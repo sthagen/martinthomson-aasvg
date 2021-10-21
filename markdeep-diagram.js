@@ -15,13 +15,9 @@
 
 // Mappings and constants used by markdeep.
 const STROKE_WIDTH = 2;
-const DEFAULT_STYLE = {
-    stroke: '#000',
-    'font-family': 'monospace',
-};
-const DEBUG_HIDE_PASSTHROUGH = false;
-const DEBUG_SHOW_GRID = true;
-const DEBUG_SHOW_SOURCE = false;
+const ARROW_COLOR = ' fill="black" stroke="none"';
+const STROKE_COLOR = ' fill="none" stroke="black"';
+const TEXT_COLOR = ' stroke="black"';
 ['min', 'max', 'abs', 'sign'].forEach(f => {
     global[f] = Math[f];
 });
@@ -32,7 +28,6 @@ function escapeHTMLEntities(str) {
     return String(str).rp(/&/g, '&amp;').rp(/</g, '&lt;').rp(/>/g, '&gt;').rp(/"/g, '&quot;');
 }
 
-/** Workaround for IE11 */
 function strToArray(s) {
     return Array.from(s);
 }
@@ -110,23 +105,34 @@ function isASCIILetter(c) {
 
     `options` is a dictionary with the following keys:
 
+    backdrop (default: false) will add a white <rect> element as a backdrop so that
+        the background of the image is not transparent
     disableText (default: false) will disable passing text
-    textGrid (default: false) will place text precisely on a grid, at the cost of breaking
-             text into small pieces, which can hurt accessibility
+    showGrid (default: false) will display a debug grid
+    spaces (default: 2) the number of spaces between different strings
+    style (default: {}) a dictionary of attributes to attach to the <svg> element
  */
 function diagramToSVG(diagramString, options) {
     // Clean up diagramString
     diagramString = equalizeLineLengths(removeLeadingSpace(diagramString));
     options = options || {};
+    if (!Number.isInteger(options.spaces)) { options.spaces = 2; } // 0 is valid so falsy tests fail.
 
-    // Temporarily replace 'o' that is surrounded by other text
-    // with another character to avoid processing it as a point
-    // decoration. This will be replaced in the final svg and is
-    // faster than checking each neighborhood each time.
-    var HIDE_O = '\ue004';
-    diagramString = diagramString.rp(/([a-zA-Z]{2})o/g, '$1' + HIDE_O);
-    diagramString = diagramString.rp(/o([a-zA-Z]{2})/g, HIDE_O + '$1');
-    diagramString = diagramString.rp(/([a-zA-Z\ue004])o([a-zA-Z\ue004])/g, '$1' + HIDE_O + '$2');
+    // Temporarily replace 'o', 'v', and 'V' if they are surrounded by other
+    // text. Use another character to avoid processing them as decorations.
+    // These will be swapped back in the final SVG.
+    const HIDE = { 'o': '\ue004', 'v': '\ue005', 'V': '\ue006' };
+    function hideChar(s, i) {
+        let r = new Array(3);
+        r.fill('[a-zA-Z' + Object.keys(HIDE).map(k => HIDE[k]).join('') + ']');
+        r[i] = '[' + Object.keys(HIDE).join('') + ']';
+        return s.replace(new RegExp(r.join(''), 'g'), function (v) {
+            return v.substring(0, i) + HIDE[v.charAt(i)] + v.substring(i + 1);
+        });
+    }
+    diagramString = hideChar(diagramString, 0);
+    diagramString = hideChar(diagramString, 1);
+    diagramString = hideChar(diagramString, 2);
 
     /** Pixels per character */
     var SCALE = 8;
@@ -268,20 +274,23 @@ function diagramToSVG(diagramString, options) {
             let end = x;
             for (; end < this.width; ++end) {
                 if (this.isUsed(end, y)) {
-                    spaces++;
                     break;
                 }
                 if (this(end, y) === ' ') {
                     spaces++;
-                    if (spaces >= 2) { break; }
                 } else {
                     spaces = 0;
                 }
+                if (spaces >= options.spaces) {
+                    end++;
+                    break;
+                }
             }
-            for (let i = x; i <= end - spaces; ++i) {
+            end -= spaces;
+            for (let i = x; i < end; ++i) {
                 this._used[y * (this.width + 1) + i] = true;
             }
-            return str.slice(y * (this.width + 1) + x, y * (this.width + 1) + end - spaces + 1).join('');
+            return str.slice(y * (this.width + 1) + x, y * (this.width + 1) + end);
         }
 
         /** Returns true if there is a solid vertical line passing through (x, y) */
@@ -565,7 +574,7 @@ function diagramToSVG(diagramString, options) {
         } else {
             svg += 'L ' + this.B;
         }
-        svg += '" stroke="currentColor" fill="none"';
+        svg += '"' + STROKE_COLOR;
         if (this.dashed) {
             svg += ' stroke-dasharray="3,6"';
         }
@@ -665,17 +674,17 @@ function diagramToSVG(diagramString, options) {
                 var cup = Vec2(C.x + dx, C.y - 0.5);
                 var cdn = Vec2(C.x + dx, C.y + 0.5);
 
-                svg += '<path d="M ' + dn + ' C ' + cdn + cup + up + '" stroke="currentColor" fill="none"/>';
+                svg += '<path class="jump" d="M ' + dn + ' C ' + cdn + cup + up + '"' + STROKE_COLOR + '/>';
 
             } else if (isPoint(decoration.type)) {
                 var cls = { '*': 'closed', 'o': 'open', '◌': 'dotted', '○': 'open', '◍': 'shaded', '●': 'closed' }[decoration.type];
-                svg += '<circle cx="' + (C.x * SCALE) + '" cy="' + (C.y * SCALE * ASPECT) +
-                    '" r="' + (SCALE - STROKE_WIDTH) + '" class="' + cls + 'dot"/>';
+                svg += '<circle class="point" cx="' + (C.x * SCALE) + '" cy="' + (C.y * SCALE * ASPECT) +
+                    '" r="' + (SCALE - STROKE_WIDTH) + '" class="' + cls + 'dot"/>\n';
             } else if (isGray(decoration.type)) {
                 var shade = Math.round((3 - GRAY_CHARACTERS.indexOf(decoration.type)) * 63.75);
-                svg += '<rect x="' + ((C.x - 0.5) * SCALE) + '" y="' + ((C.y - 0.5) * SCALE * ASPECT) +
+                svg += '<rect class="gray" x="' + ((C.x - 0.5) * SCALE) + '" y="' + ((C.y - 0.5) * SCALE * ASPECT) +
                     '" width="' + SCALE + '" height="' + (SCALE * ASPECT) +
-                    '" stroke="none" fill="rgb(' + shade + ',' + shade + ',' + shade + ')"/>';
+                    '" fill="rgb(' + shade + ',' + shade + ',' + shade + ')"/>\n';
 
             } else if (isTri(decoration.type)) {
                 // 30-60-90 triangle
@@ -686,13 +695,13 @@ function diagramToSVG(diagramString, options) {
                 var tip = Vec2(C.x + xs, C.y - ys);
                 var up = Vec2(C.x + xs, C.y + ys);
                 var dn = Vec2(C.x - xs, C.y + ys);
-                svg += '<polygon points="' + tip + up + dn + '" stroke="none"/>\n';
+                svg += '<polygon class="triangle" points="' + tip + up + dn + '"' + ARROW_COLOR + '/>\n';
             } else { // Arrow head
                 var tip = Vec2(C.x + 1, C.y);
                 var up = Vec2(C.x - 0.5, C.y - 0.35);
                 var dn = Vec2(C.x - 0.5, C.y + 0.35);
-                svg += '<polygon points="' + tip + up + dn +
-                    '" stroke="none" transform="rotate(' + decoration.angle + ',' + C + ')"/>\n';
+                svg += '<polygon class="arrowhead" points="' + tip + up + dn + '"' + ARROW_COLOR +
+                    ' transform="rotate(' + decoration.angle + ',' + C + ')"/>\n';
             }
         }
         return svg;
@@ -1281,23 +1290,37 @@ function diagramToSVG(diagramString, options) {
     findReplacementCharacters(grid, pathSet);
     findDecorations(grid, pathSet, decorationSet);
 
-    let svg = '<svg class="diagram" xmlns="http://www.w3.org/2000/svg" version="1.1" height="' +
-        ((grid.height + 1) * SCALE * ASPECT) + '" width="' + ((grid.width + 1) * SCALE) +
-        '" text-anchor="middle" font-family="monospace" font-size="13px"'
-    Object.keys(options.style)
-        .filter(k => typeof options.style[k] === 'string')
-        .forEach(k => svg += ' ' + k + '="' + escapeHTMLEntities(options.style[k]) + '"');
-    svg += '>\n';
+    let width = (grid.width + 1) * SCALE;
+    let height = (grid.height + 1) * SCALE * ASPECT;
+    let attrs = options.style;
+    attrs.xmlns = 'http://www.w3.org/2000/svg';
+    attrs.version = '1.1';
+    attrs.height = height.toString();
+    attrs.width = width.toString();
+    attrs.viewBox = '0 0 ' + width + ' ' + height;
+    // These attributes can be overridden:
+    const DEFAULT_ATTRS = {
+        'class': 'diagram',
+        'text-anchor': 'middle',
+        'font-family': 'monospace',
+        'font-size': '13px',
+    };
+    Object.keys(DEFAULT_ATTRS).forEach(k => {
+        if (!attrs[k]) { attrs[k] = DEFAULT_ATTRS[k]; }
+    });
+    let svg = '<svg ' + Object.keys(attrs)
+        .filter(k => typeof attrs[k] === 'string')
+        .map(k => k + '="' + escapeHTMLEntities(attrs[k]) + '"').join(' ') + '>\n';
 
     if (options.backdrop) {
-        svg += '<rect x="0" y="0" width="' + ((grid.width + 1) * SCALE)
+        svg += '<rect class="backdrop" x="0" y="0" width="' + ((grid.width + 1) * SCALE)
             + '" height="' + ((grid.height + 1) * SCALE * ASPECT)
-            + '" rx="3px" ry="3px" stroke="none" fill="white" opacity="0.9"/>\n';
+            + '" rx="3px" ry="3px" fill="white" opacity="0.9"/>\n';
     }
     svg += '<g transform="translate(' + Vec2(1, 1) + ')">\n';
 
-    if (options.showGrid) {
-        svg += '<g opacity="0.1">\n';
+    if (options.grid) {
+        svg += '<g class="grid" opacity="0.1">\n';
         for (var x = 0; x < grid.width; ++x) {
             for (var y = 0; y < grid.height; ++y) {
                 svg += '<rect x="' + ((x - 0.5) * SCALE + 1) + '" y="' + ((y - 0.5) * SCALE * ASPECT + 2) + '" width="' + (SCALE - 2) + '" height="' + (SCALE * ASPECT - 2) + '" fill="';
@@ -1319,16 +1342,13 @@ function diagramToSVG(diagramString, options) {
 
     // Convert any remaining characters
     if (!options.disableText) {
-        svg += '<g>';
+        svg += '<g class="text">\n';
         // Enlarge hexagons so that they fill a grid
         for (var y = 0; y < grid.height; ++y) {
             for (var x = 0; x < grid.width; ++x) {
                 var c = grid(x, y);
                 if (/[\u2B22\u2B21]/.test(c)) {
-                    svg += '<text x="' + (x * SCALE) + '" y="' + (4 + y * SCALE * ASPECT) + '" color="currentColor" font-size="20.5px">' + escapeHTMLEntities(c) + '</text>';
-                    grid.setUsed(x, y);
-                } else if (options.textGrid && (c !== ' ') && !grid.isUsed(x, y)) {
-                    svg += '<text x="' + (x * SCALE) + '" y="' + (4 + y * SCALE * ASPECT) + '" color="currentColor">' + escapeHTMLEntities(c) + '</text>';
+                    svg += '<text x="' + (x * SCALE) + '" y="' + (4 + y * SCALE * ASPECT) + '"' + TEXT_COLOR + ' font-size="20.5px">' + escapeHTMLEntities(c) + '</text>\n';
                     grid.setUsed(x, y);
                 }
             } // x
@@ -1337,16 +1357,24 @@ function diagramToSVG(diagramString, options) {
             let x = grid.textStart(0, y);
             while (x < grid.width) {
                 let t = grid.text(x, y);
-                svg += '<text x="' + ((x + (t.length / 2) - 0.5) * SCALE) + '" y="' + (4 + y * SCALE * ASPECT) + '">' + escapeHTMLEntities(t) + '</text>';
+                let s = t.join('');
+                svg += '<text x="' + ((x + (t.length / 2) - 0.5) * SCALE) + '" y="' + (4 + y * SCALE * ASPECT);
+                if (options.spaces > 2 && s.indexOf('  ') >= 0) {
+                    svg += '" xml:space="preserve'
+                }
+                if (options.stretch) {
+                    svg += '" textLength="' + (t.length * SCALE) + '" lengthAdjust="spacingAndGlyphs';
+                }
+                svg += '">' + escapeHTMLEntities(s) + '</text>\n';
                 x = grid.textStart(x + t.length, y);
             }
         } // y
-        svg += '</g>';
+        svg += '</g>\n';
     }
 
-    if (DEBUG_SHOW_SOURCE) {
+    if (options.source) {
         // Offset the characters a little for easier viewing
-        svg += '<g transform="translate(2,2)">\n';
+        svg += '<g class="source" transform="translate(2,2)">\n';
         for (var y = 0; y < grid.height; ++y) {
             for (var x = 0; x < grid.width; ++x) {
                 var c = grid(x, y);
@@ -1360,8 +1388,9 @@ function diagramToSVG(diagramString, options) {
 
     svg += '</g></svg>';
 
-    svg = svg.rp(new RegExp(HIDE_O, 'g'), 'o');
-
+    Object.keys(HIDE).forEach(k => {
+        svg = svg.rp(new RegExp(HIDE[k], 'g'), k);
+    });
 
     return svg;
 }
