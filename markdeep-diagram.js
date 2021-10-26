@@ -15,7 +15,7 @@
 
 // Mappings and constants used by markdeep.
 const STROKE_WIDTH = 2;
-const ARROW_COLOR = ' fill="black" stroke="none"';
+const ARROW_COLOR = ' fill="black"'; // + ' stroke="none"', but xml2rfc doesn't like that.
 const STROKE_COLOR = ' fill="none" stroke="black"';
 const TEXT_COLOR = ' stroke="black"';
 ['min', 'max', 'abs', 'sign'].forEach(f => {
@@ -152,7 +152,7 @@ function diagramToSVG(diagramString, options) {
     var POINT_CHARACTERS = 'o*◌○◍●';
     var JUMP_CHARACTERS = '()';
     var UNDIRECTED_VERTEX_CHARACTERS = "+";
-    var VERTEX_CHARACTERS = UNDIRECTED_VERTEX_CHARACTERS + ".'";
+    var VERTEX_CHARACTERS = UNDIRECTED_VERTEX_CHARACTERS + ".',`";
 
     // GRAY[i] is the Unicode block character for (i+1)/4 level gray
     var GRAY_CHARACTERS = '\u2591\u2592\u2593\u2588';
@@ -164,8 +164,8 @@ function diagramToSVG(diagramString, options) {
 
     function isUndirectedVertex(c) { return UNDIRECTED_VERTEX_CHARACTERS.indexOf(c) + 1; }
     function isVertex(c) { return VERTEX_CHARACTERS.indexOf(c) !== -1; }
-    function isTopVertex(c) { return isUndirectedVertex(c) || (c === '.'); }
-    function isBottomVertex(c) { return isUndirectedVertex(c) || (c === "'"); }
+    function isTopVertex(c) { return isUndirectedVertex(c) || (c === '.') || (c === ','); }
+    function isBottomVertex(c) { return isUndirectedVertex(c) || (c === "'") || (c === '`'); }
     function isVertexOrLeftDecoration(c) { return isVertex(c) || (c === '<') || isPoint(c); }
     function isVertexOrRightDecoration(c) { return isVertex(c) || (c === '>') || isPoint(c); }
     function isArrowHead(c) { return ARROW_HEAD_CHARACTERS.indexOf(c) + 1; }
@@ -203,9 +203,13 @@ function diagramToSVG(diagramString, options) {
         Object.seal(this);
     }
 
-    /** Returns an SVG representation */
+    /** Returns coordinates */
+    Vec2.prototype.coords = function () {
+        return '' + (this.x * SCALE) + ',' + (this.y * SCALE * ASPECT);
+    }
+    /** Returns an SVG representation, with a trailing space */
     Vec2.prototype.toString = Vec2.prototype.toSVG =
-        function () { return '' + (this.x * SCALE) + ',' + (this.y * SCALE * ASPECT) + ' '; };
+        function () { return this.coords() + ' '; };
 
     /** Converts a "rectangular" string defined by newlines into 2D
         array of characters. Grids are immutable. */
@@ -406,7 +410,7 @@ function diagramToSVG(diagramString, options) {
                 // Looks like a diagonal line...does it continue? We need two in a row.
                 return (isSolidDLine(rt) || isTopVertex(rt) || isPoint(rt) || (rt === '^') || (rt === '_') ||
                     isSolidDLine(lt) || isBottomVertex(lt) || isPoint(lt) || (lt === 'v') || (lt === '_'));
-            } else if (c === '.') {
+            } else if (c === '.' || c === ',') {
                 return (lt === '/');
             } else if (c === "'") {
                 return (rt === '/');
@@ -570,9 +574,9 @@ function diagramToSVG(diagramString, options) {
         var svg = '<path d="M ' + this.A;
 
         if (this.isCurved()) {
-            svg += 'C ' + this.C + this.D + this.B;
+            svg += 'C ' + this.C + this.D + this.B.coords();
         } else {
-            svg += 'L ' + this.B;
+            svg += 'L ' + this.B.coords();
         }
         svg += '"' + STROKE_COLOR;
         if (this.dashed) {
@@ -674,11 +678,11 @@ function diagramToSVG(diagramString, options) {
                 var cup = Vec2(C.x + dx, C.y - 0.5);
                 var cdn = Vec2(C.x + dx, C.y + 0.5);
 
-                svg += '<path class="jump" d="M ' + dn + ' C ' + cdn + cup + up + '"' + STROKE_COLOR + '/>';
+                svg += '<path class="jump" d="M ' + dn + ' C ' + cdn + cup + up.coords() + '"' + STROKE_COLOR + '/>';
 
             } else if (isPoint(decoration.type)) {
                 var cls = { '*': 'closed', 'o': 'open', '◌': 'dotted', '○': 'open', '◍': 'shaded', '●': 'closed' }[decoration.type];
-                svg += '<circle class="point" cx="' + (C.x * SCALE) + '" cy="' + (C.y * SCALE * ASPECT) +
+                svg += '<circle cx="' + (C.x * SCALE) + '" cy="' + (C.y * SCALE * ASPECT) +
                     '" r="' + (SCALE - STROKE_WIDTH) + '" class="' + cls + 'dot"/>\n';
             } else if (isGray(decoration.type)) {
                 var shade = Math.round((3 - GRAY_CHARACTERS.indexOf(decoration.type)) * 63.75);
@@ -695,13 +699,13 @@ function diagramToSVG(diagramString, options) {
                 var tip = Vec2(C.x + xs, C.y - ys);
                 var up = Vec2(C.x + xs, C.y + ys);
                 var dn = Vec2(C.x - xs, C.y + ys);
-                svg += '<polygon class="triangle" points="' + tip + up + dn + '"' + ARROW_COLOR + '/>\n';
+                svg += '<polygon class="triangle" points="' + tip + up + dn.coords() + '"' + ARROW_COLOR + '/>\n';
             } else { // Arrow head
                 var tip = Vec2(C.x + 1, C.y);
                 var up = Vec2(C.x - 0.5, C.y - 0.35);
                 var dn = Vec2(C.x - 0.5, C.y + 0.35);
-                svg += '<polygon class="arrowhead" points="' + tip + up + dn + '"' + ARROW_COLOR +
-                    ' transform="rotate(' + decoration.angle + ',' + C + ')"/>\n';
+                svg += '<polygon class="arrowhead" points="' + tip + up + dn.coords() + '"' + ARROW_COLOR +
+                    ' transform="rotate(' + decoration.angle + ',' + C.coords() + ')"/>\n';
             }
         }
         return svg;
@@ -977,6 +981,7 @@ function diagramToSVG(diagramString, options) {
         // horizontally-adjacent characters.
         for (var y = 0; y < grid.height; ++y) {
             for (var x = 0; x < grid.width; ++x) {
+                const CURVE = 0.551915024494; // https://spencermortensen.com/articles/bezier-circle/
                 var c = grid(x, y);
 
                 // Note that because of undirected vertices, the
@@ -987,7 +992,7 @@ function diagramToSVG(diagramString, options) {
                     if (isSolidHLine(grid(x - 1, y)) && isSolidVLine(grid(x + 1, y + 1))) {
                         grid.setUsed(x - 1, y); grid.setUsed(x, y); grid.setUsed(x + 1, y + 1);
                         pathSet.insert(new Path(Vec2(x - 1, y), Vec2(x + 1, y + 1),
-                            Vec2(x + 1.1, y), Vec2(x + 1, y + 1)));
+                            Vec2(x - 1 + CURVE * ASPECT, y), Vec2(x + 1, y + 1 - CURVE)));
                     }
 
                     //  .-
@@ -995,7 +1000,7 @@ function diagramToSVG(diagramString, options) {
                     if (isSolidHLine(grid(x + 1, y)) && isSolidVLine(grid(x - 1, y + 1))) {
                         grid.setUsed(x - 1, y + 1); grid.setUsed(x, y); grid.setUsed(x + 1, y);
                         pathSet.insert(new Path(Vec2(x + 1, y), Vec2(x - 1, y + 1),
-                            Vec2(x - 1.1, y), Vec2(x - 1, y + 1)));
+                            Vec2(x + 1 - CURVE * ASPECT, y), Vec2(x - 1, y + 1 - CURVE)));
                     }
                 }
 
@@ -1021,7 +1026,7 @@ function diagramToSVG(diagramString, options) {
                     if (isSolidHLine(grid(x - 1, y)) && isSolidVLine(grid(x + 1, y - 1))) {
                         grid.setUsed(x - 1, y); grid.setUsed(x, y); grid.setUsed(x + 1, y - 1);
                         pathSet.insert(new Path(Vec2(x - 1, y), Vec2(x + 1, y - 1),
-                            Vec2(x + 1.1, y), Vec2(x + 1, y - 1)));
+                            Vec2(x - 1 + CURVE * ASPECT, y), Vec2(x + 1, y - 1 + CURVE)));
                     }
 
                     // |
@@ -1029,7 +1034,7 @@ function diagramToSVG(diagramString, options) {
                     if (isSolidHLine(grid(x + 1, y)) && isSolidVLine(grid(x - 1, y - 1))) {
                         grid.setUsed(x - 1, y - 1); grid.setUsed(x, y); grid.setUsed(x + 1, y);
                         pathSet.insert(new Path(Vec2(x + 1, y), Vec2(x - 1, y - 1),
-                            Vec2(x - 1.1, y), Vec2(x - 1, y - 1)));
+                            Vec2(x + 1 - CURVE * ASPECT, y), Vec2(x - 1, y - 1 + CURVE)));
                     }
                 }
 
@@ -1317,7 +1322,7 @@ function diagramToSVG(diagramString, options) {
             + '" height="' + ((grid.height + 1) * SCALE * ASPECT)
             + '" rx="3px" ry="3px" fill="white" opacity="0.9"/>\n';
     }
-    svg += '<g transform="translate(' + Vec2(1, 1) + ')">\n';
+    svg += '<g transform="translate(' + Vec2(1, 1).coords() + ')">\n';
 
     if (options.grid) {
         svg += '<g class="grid" opacity="0.1">\n';
