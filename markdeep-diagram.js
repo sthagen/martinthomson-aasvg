@@ -100,6 +100,34 @@ function isASCIILetter(c) {
     return ((code >= 65) && (code <= 90)) || ((code >= 97) && (code <= 122));
 }
 
+const MARKERS = { 'o': '\ue004', 'v': '\ue005', 'V': '\ue006' };
+
+function hideChar(s, i) {
+    let r = new Array(3);
+    r.fill('[a-zA-Z' + Object.values(MARKERS).join('') + ']');
+    r[i] = '[' + Object.keys(MARKERS).join('') + ']';
+    return s.replace(new RegExp(r.join(''), 'g'),
+        v => v.substring(0, i) + MARKERS[v.charAt(i)] + v.substring(i + 1));
+}
+
+function unhideMarkers(s) {
+    Object.keys(MARKERS).forEach(k => {
+        s = s.rp(new RegExp(MARKERS[k], 'g'), k);
+    });
+    return s;
+}
+
+function hideMarkers(s) {
+    s = hideChar(s, 0);
+    s = hideChar(s, 1);
+    s = hideChar(s, 2);
+    // Unhide strings that only contain 'o' or 'v'.
+    // Note: Using \B as \ue00? is a non-word character.
+    const allHidden = '\\B[' + Object.values(MARKERS).join('') + ']{3,}\\B';
+    return s.replace(new RegExp(allHidden, 'g'), unhideMarkers);
+}
+
+
 /** Converts diagramString, which is a Markdeep diagram without the surrounding asterisks, to
     SVG (HTML). Lines may have ragged lengths.
 
@@ -121,18 +149,7 @@ function diagramToSVG(diagramString, options) {
     // Temporarily replace 'o', 'v', and 'V' if they are surrounded by other
     // text. Use another character to avoid processing them as decorations.
     // These will be swapped back in the final SVG.
-    const HIDE = { 'o': '\ue004', 'v': '\ue005', 'V': '\ue006' };
-    function hideChar(s, i) {
-        let r = new Array(3);
-        r.fill('[a-zA-Z' + Object.keys(HIDE).map(k => HIDE[k]).join('') + ']');
-        r[i] = '[' + Object.keys(HIDE).join('') + ']';
-        return s.replace(new RegExp(r.join(''), 'g'), function (v) {
-            return v.substring(0, i) + HIDE[v.charAt(i)] + v.substring(i + 1);
-        });
-    }
-    diagramString = hideChar(diagramString, 0);
-    diagramString = hideChar(diagramString, 1);
-    diagramString = hideChar(diagramString, 2);
+    diagramString = hideMarkers(diagramString);
 
     /** Pixels per character */
     var SCALE = 8;
@@ -168,7 +185,6 @@ function diagramToSVG(diagramString, options) {
     function isBottomVertex(c) { return isUndirectedVertex(c) || (c === "'") || (c === '`'); }
     function isVertexOrLeftDecoration(c) { return isVertex(c) || (c === '<') || isPoint(c); }
     function isVertexOrRightDecoration(c) { return isVertex(c) || (c === '>') || isPoint(c); }
-    function isArrowHead(c) { return ARROW_HEAD_CHARACTERS.indexOf(c) + 1; }
     function isGray(c) { return GRAY_CHARACTERS.indexOf(c) + 1; }
     function isTri(c) { return TRI_CHARACTERS.indexOf(c) + 1; }
 
@@ -182,7 +198,6 @@ function diagramToSVG(diagramString, options) {
     function isJump(c) { return JUMP_CHARACTERS.indexOf(c) + 1; }
     function isPoint(c) { return POINT_CHARACTERS.indexOf(c) + 1; }
     function isDecoration(c) { return DECORATION_CHARACTERS.indexOf(c) + 1; }
-    function isEmpty(c) { return c === ' '; }
 
     ///////////////////////////////////////////////////////////////////////////////
     // Math library
@@ -205,7 +220,8 @@ function diagramToSVG(diagramString, options) {
 
     /** Returns coordinates */
     Vec2.prototype.coords = function () {
-        return '' + (this.x * SCALE) + ',' + (this.y * SCALE * ASPECT);
+        function s(x) { return x.toFixed(5).replace(/\.?0*$/, ''); }
+        return s(this.x * SCALE) + ',' + s(this.y * SCALE * ASPECT);
     }
     /** Returns an SVG representation, with a trailing space */
     Vec2.prototype.toString = Vec2.prototype.toSVG =
@@ -322,7 +338,7 @@ function diagramToSVG(diagramString, options) {
             } else if (isTopVertex(c) || (c === '^')) {
                 // May be the top of a vertical line
                 return isSolidVLine(dn) || (isJump(dn) && (c !== '.'));
-            } else if (isBottomVertex(c) || (c === 'v')) {
+            } else if (isBottomVertex(c) || (c === 'v' || c === 'V')) {
                 return isSolidVLine(up) || (isJump(up) && (c !== "'"));
             } else if (isPoint(c)) {
                 return isSolidVLine(up) || isSolidVLine(dn);
@@ -378,7 +394,7 @@ function diagramToSVG(diagramString, options) {
 
             if (c === '\\') {
                 // Looks like a diagonal line...does it continue? We need two in a row.
-                return (isSolidBLine(rt) || isBottomVertex(rt) || isPoint(rt) || (rt === 'v') ||
+                return (isSolidBLine(rt) || isBottomVertex(rt) || isPoint(rt) || (rt === 'v' || rt === 'V') ||
                     isSolidBLine(lt) || isTopVertex(lt) || isPoint(lt) || (lt === '^') ||
                     (grid(x, y - 1) === '/') || (grid(x, y + 1) === '/') || (rt === '_') || (lt === '_'));
             } else if (c === '.') {
@@ -387,7 +403,7 @@ function diagramToSVG(diagramString, options) {
                 return (lt === '\\');
             } else if (c === '^') {
                 return rt === '\\';
-            } else if (c === 'v') {
+            } else if (c === 'v' || c === 'V') {
                 return lt === '\\';
             } else if (isVertex(c) || isPoint(c) || (c === '|')) {
                 return isSolidBLine(lt) || isSolidBLine(rt);
@@ -409,14 +425,14 @@ function diagramToSVG(diagramString, options) {
             } else if (isSolidDLine(c)) {
                 // Looks like a diagonal line...does it continue? We need two in a row.
                 return (isSolidDLine(rt) || isTopVertex(rt) || isPoint(rt) || (rt === '^') || (rt === '_') ||
-                    isSolidDLine(lt) || isBottomVertex(lt) || isPoint(lt) || (lt === 'v') || (lt === '_'));
+                    isSolidDLine(lt) || isBottomVertex(lt) || isPoint(lt) || (lt === 'v' || lt === 'V') || (lt === '_'));
             } else if (c === '.' || c === ',') {
                 return (lt === '/');
             } else if (c === "'") {
                 return (rt === '/');
             } else if (c === '^') {
                 return lt === '/';
-            } else if (c === 'v') {
+            } else if (c === 'v' || c === 'V') {
                 return rt === '/';
             } else if (isVertex(c) || isPoint(c) || (c === '|')) {
                 return isSolidDLine(lt) || isSolidDLine(rt);
@@ -678,12 +694,19 @@ function diagramToSVG(diagramString, options) {
                 var cup = Vec2(C.x + dx, C.y - 0.5);
                 var cdn = Vec2(C.x + dx, C.y + 0.5);
 
-                svg += '<path class="jump" d="M ' + dn + ' C ' + cdn + cup + up.coords() + '"' + STROKE_COLOR + '/>';
+                svg += '<path class="jump" d="M ' + dn + 'C ' + cdn + cup + up.coords() + '"' + STROKE_COLOR + '/>';
 
             } else if (isPoint(decoration.type)) {
-                var cls = { '*': 'closed', 'o': 'open', '◌': 'dotted', '○': 'open', '◍': 'shaded', '●': 'closed' }[decoration.type];
+                const CLASSES = { '*': 'closed', 'o': 'open', '◌': 'dotted', '○': 'open', '◍': 'shaded', '●': 'closed' };
+                const FILL = { 'closed': 'black', 'open': 'white', 'dotted': 'white', 'shaded': '#666' };
+                const STROKE = {
+                    'closed': '', 'open': ' stroke="black"',
+                    'dotted': ' stroke="black" stroke-dasharray="1,1"', 'shaded': ' stroke="black"'
+                };
+                var cls = CLASSES[decoration.type];
                 svg += '<circle cx="' + (C.x * SCALE) + '" cy="' + (C.y * SCALE * ASPECT) +
-                    '" r="' + (SCALE - STROKE_WIDTH) + '" class="' + cls + 'dot"/>\n';
+                    '" r="' + (SCALE - STROKE_WIDTH) + '" class="' + cls + 'dot"' +
+                    ' fill="' + FILL[cls] + '"' + STROKE[cls] + '/>\n';
             } else if (isGray(decoration.type)) {
                 var shade = Math.round((3 - GRAY_CHARACTERS.indexOf(decoration.type)) * 63.75);
                 svg += '<rect class="gray" x="' + ((C.x - 0.5) * SCALE) + '" y="' + ((C.y - 0.5) * SCALE * ASPECT) +
@@ -699,12 +722,12 @@ function diagramToSVG(diagramString, options) {
                 var tip = Vec2(C.x + xs, C.y - ys);
                 var up = Vec2(C.x + xs, C.y + ys);
                 var dn = Vec2(C.x - xs, C.y + ys);
-                svg += '<polygon class="triangle" points="' + tip + up + dn.coords() + '"' + ARROW_COLOR + '/>\n';
+                svg += '<polygon class="triangle" points="' + tip + up + dn.coords(4) + '"' + ARROW_COLOR + '/>\n';
             } else { // Arrow head
                 var tip = Vec2(C.x + 1, C.y);
                 var up = Vec2(C.x - 0.5, C.y - 0.35);
                 var dn = Vec2(C.x - 0.5, C.y + 0.35);
-                svg += '<polygon class="arrowhead" points="' + tip + up + dn.coords() + '"' + ARROW_COLOR +
+                svg += '<polygon class="arrowhead" points="' + tip + up + dn + '"' + ARROW_COLOR +
                     ' transform="rotate(' + decoration.angle + ',' + C.coords() + ')"/>\n';
             }
         }
@@ -982,6 +1005,8 @@ function diagramToSVG(diagramString, options) {
         for (var y = 0; y < grid.height; ++y) {
             for (var x = 0; x < grid.width; ++x) {
                 const CURVE = 0.551915024494; // https://spencermortensen.com/articles/bezier-circle/
+                const CURVE_X = 2 * CURVE;
+                const CURVE_Y = CURVE;
                 var c = grid(x, y);
 
                 // Note that because of undirected vertices, the
@@ -992,7 +1017,7 @@ function diagramToSVG(diagramString, options) {
                     if (isSolidHLine(grid(x - 1, y)) && isSolidVLine(grid(x + 1, y + 1))) {
                         grid.setUsed(x - 1, y); grid.setUsed(x, y); grid.setUsed(x + 1, y + 1);
                         pathSet.insert(new Path(Vec2(x - 1, y), Vec2(x + 1, y + 1),
-                            Vec2(x - 1 + CURVE * ASPECT, y), Vec2(x + 1, y + 1 - CURVE)));
+                            Vec2(x - 1 + CURVE_X, y), Vec2(x + 1, y + 1 - CURVE_Y)));
                     }
 
                     //  .-
@@ -1000,7 +1025,7 @@ function diagramToSVG(diagramString, options) {
                     if (isSolidHLine(grid(x + 1, y)) && isSolidVLine(grid(x - 1, y + 1))) {
                         grid.setUsed(x - 1, y + 1); grid.setUsed(x, y); grid.setUsed(x + 1, y);
                         pathSet.insert(new Path(Vec2(x + 1, y), Vec2(x - 1, y + 1),
-                            Vec2(x + 1 - CURVE * ASPECT, y), Vec2(x - 1, y + 1 - CURVE)));
+                            Vec2(x + 1 - CURVE_X, y), Vec2(x - 1, y + 1 - CURVE_Y)));
                     }
                 }
 
@@ -1026,7 +1051,7 @@ function diagramToSVG(diagramString, options) {
                     if (isSolidHLine(grid(x - 1, y)) && isSolidVLine(grid(x + 1, y - 1))) {
                         grid.setUsed(x - 1, y); grid.setUsed(x, y); grid.setUsed(x + 1, y - 1);
                         pathSet.insert(new Path(Vec2(x - 1, y), Vec2(x + 1, y - 1),
-                            Vec2(x - 1 + CURVE * ASPECT, y), Vec2(x + 1, y - 1 + CURVE)));
+                            Vec2(x - 1 + CURVE_X, y), Vec2(x + 1, y - 1 + CURVE_Y)));
                     }
 
                     // |
@@ -1034,7 +1059,7 @@ function diagramToSVG(diagramString, options) {
                     if (isSolidHLine(grid(x + 1, y)) && isSolidVLine(grid(x - 1, y - 1))) {
                         grid.setUsed(x - 1, y - 1); grid.setUsed(x, y); grid.setUsed(x + 1, y);
                         pathSet.insert(new Path(Vec2(x + 1, y), Vec2(x - 1, y - 1),
-                            Vec2(x + 1 - CURVE * ASPECT, y), Vec2(x - 1, y - 1 + CURVE)));
+                            Vec2(x + 1 - CURVE_X, y), Vec2(x - 1, y - 1 + CURVE_Y)));
                     }
                 }
 
@@ -1228,7 +1253,7 @@ function diagramToSVG(diagramString, options) {
                             decorationSet.insert(x, y - 0.5, '>', 270);
                             grid.setUsed(x, y);
                         }
-                    } else if (c === 'v') {
+                    } else if (c === 'v' || c === 'V') {
                         if (pathSet.downEndsAt(x, y + 0.5)) {
                             decorationSet.insert(x, y + 0.5, '>', 90);
                             grid.setUsed(x, y);
@@ -1393,11 +1418,7 @@ function diagramToSVG(diagramString, options) {
 
     svg += '</g></svg>';
 
-    Object.keys(HIDE).forEach(k => {
-        svg = svg.rp(new RegExp(HIDE[k], 'g'), k);
-    });
-
-    return svg;
+    return unhideMarkers(svg);
 }
 
 module.exports = { diagramToSVG };
