@@ -155,8 +155,7 @@ function diagramToSVG(diagramString, options) {
     var SCALE = 8;
 
     /** Multiply Y coordinates by this when generating the final SVG
-        result to account for the aspect ratio of text files. This
-        MUST be 2 */
+        result to account for the aspect ratio of text files. */
     var ASPECT = 2;
 
     var DIAGONAL_ANGLE = Math.atan(1.0 / ASPECT) * 180 / Math.PI;
@@ -221,7 +220,7 @@ function diagramToSVG(diagramString, options) {
     /** Returns coordinates */
     Vec2.prototype.coords = function () {
         function s(x) { return x.toFixed(5).replace(/\.?0*$/, ''); }
-        return s(this.x * SCALE) + ',' + s(this.y * SCALE * ASPECT);
+        return s((this.x + 1) * SCALE) + ',' + s((this.y + 1) * SCALE * ASPECT);
     }
     /** Returns an SVG representation, with a trailing space */
     Vec2.prototype.toString = Vec2.prototype.toSVG =
@@ -396,7 +395,9 @@ function diagramToSVG(diagramString, options) {
                 // Looks like a diagonal line...does it continue? We need two in a row.
                 return (isSolidBLine(rt) || isBottomVertex(rt) || isPoint(rt) || (rt === 'v' || rt === 'V') ||
                     isSolidBLine(lt) || isTopVertex(lt) || isPoint(lt) || (lt === '^') ||
-                    (grid(x, y - 1) === '/') || (grid(x, y + 1) === '/') || (rt === '_') || (lt === '_'));
+                    (grid(x, y - 1) === '/') || (grid(x, y + 1) === '/') || (rt === '_') || (lt === '_') ||
+                    (grid(x + 1, y) === '/' && grid(x - 1, y - 1) === '_') ||
+                    (grid(x - 1, y) === '/' && grid(x + 1, y) === '_'));
             } else if (c === '.') {
                 return (rt === '\\');
             } else if (c === "'") {
@@ -421,6 +422,11 @@ function diagramToSVG(diagramString, options) {
 
             if (c === '/' && ((grid(x, y - 1) === '\\') || (grid(x, y + 1) === '\\'))) {
                 // Special case of tiny hexagon corner
+                return true;
+            } else if (c === '/' && ((grid(x + 1, y) === '\\' && grid(x - 1, y) === '_') ||
+                (grid(x - 1, y) === '\\' && grid(x + 1, y - 1) === '_'))) {
+                // _/\ or   _
+                //        \/
                 return true;
             } else if (isSolidDLine(c)) {
                 // Looks like a diagonal line...does it continue? We need two in a row.
@@ -704,15 +710,14 @@ function diagramToSVG(diagramString, options) {
                     'dotted': ' stroke="black" stroke-dasharray="1,1"', 'shaded': ' stroke="black"'
                 };
                 var cls = CLASSES[decoration.type];
-                svg += '<circle cx="' + (C.x * SCALE) + '" cy="' + (C.y * SCALE * ASPECT) +
+                svg += '<circle cx="' + ((C.x + 1) * SCALE) + '" cy="' + ((C.y + 1) * SCALE * ASPECT) +
                     '" r="' + (SCALE - STROKE_WIDTH) + '" class="' + cls + 'dot"' +
                     ' fill="' + FILL[cls] + '"' + STROKE[cls] + '/>\n';
             } else if (isGray(decoration.type)) {
                 var shade = Math.round((3 - GRAY_CHARACTERS.indexOf(decoration.type)) * 63.75);
-                svg += '<rect class="gray" x="' + ((C.x - 0.5) * SCALE) + '" y="' + ((C.y - 0.5) * SCALE * ASPECT) +
+                svg += '<rect class="gray" x="' + ((C.x + 0.5) * SCALE) + '" y="' + ((C.y + 0.5) * SCALE * ASPECT) +
                     '" width="' + SCALE + '" height="' + (SCALE * ASPECT) +
                     '" fill="rgb(' + shade + ',' + shade + ',' + shade + ')"/>\n';
-
             } else if (isTri(decoration.type)) {
                 // 30-60-90 triangle
                 var index = TRI_CHARACTERS.indexOf(decoration.type);
@@ -897,6 +902,11 @@ function diagramToSVG(diagramString, options) {
                             //   ^
                             //    \
                             A.x -= 0.25; A.y -= 0.25;
+                        } else if (top === '\\' && grid.isSolidDLineAt(A.x - 1, A.y)) {
+                            // Cap a sharp vertex:
+                            //   \  /   \  _
+                            //    \/     \/
+                            A.x -= 0.5; A.y -= 0.5;
                         }
 
                         var bottom = grid(B);
@@ -919,6 +929,11 @@ function diagramToSVG(diagramString, options) {
                             //      o
 
                             B.x += 0.25; B.y += 0.25;
+                        } else if (bottom === '\\' && grid.isSolidDLineAt(B.x + 1, B.y)) {
+                            // Cap a sharp vertex:
+                            //     /\   _/\
+                            //    /  \     \
+                            B.x += 0.5; B.y += 0.5;
                         }
 
                         pathSet.insert(new Path(A, B));
@@ -966,6 +981,11 @@ function diagramToSVG(diagramString, options) {
                             //     /
 
                             B.x += 0.25; B.y -= 0.25;
+                        } if (bottom === '/' && grid.isSolidBLineAt(B.x + 1, B.y)) {
+                            // Cap a sharp vertex:
+                            //   \  /   \  _
+                            //    \/     \/
+                            B.x += 0.5; B.y -= 0.5;
                         }
 
                         var dnlt = grid(A.x - 1, A.y + 1);
@@ -989,6 +1009,11 @@ function diagramToSVG(diagramString, options) {
                             //     o
 
                             A.x -= 0.25; A.y += 0.25;
+                        } else if (top === '/' && grid.isSolidBLineAt(A.x - 1, A.y)) {
+                            // Cap a sharp vertex:
+                            //    \  /    _  /
+                            //     \/      \/
+                            A.x -= 0.5; A.y += 0.5;
                         }
                         pathSet.insert(new Path(A, B));
 
@@ -1333,7 +1358,7 @@ function diagramToSVG(diagramString, options) {
         'class': 'diagram',
         'text-anchor': 'middle',
         'font-family': 'monospace',
-        'font-size': '13px',
+        'font-size': (SCALE * 13 / 8).toString() + 'px',
     };
     Object.keys(DEFAULT_ATTRS).forEach(k => {
         if (!attrs[k]) { attrs[k] = DEFAULT_ATTRS[k]; }
@@ -1347,13 +1372,14 @@ function diagramToSVG(diagramString, options) {
             + '" height="' + ((grid.height + 1) * SCALE * ASPECT)
             + '" rx="3px" ry="3px" fill="white" opacity="0.9"/>\n';
     }
-    svg += '<g transform="translate(' + Vec2(1, 1).coords() + ')">\n';
-
     if (options.grid) {
         svg += '<g class="grid" opacity="0.1">\n';
         for (var x = 0; x < grid.width; ++x) {
             for (var y = 0; y < grid.height; ++y) {
-                svg += '<rect x="' + ((x - 0.5) * SCALE + 1) + '" y="' + ((y - 0.5) * SCALE * ASPECT + 2) + '" width="' + (SCALE - 2) + '" height="' + (SCALE * ASPECT - 2) + '" fill="';
+                svg += '<rect x="' + ((x + 0.5) * SCALE + 1) +
+                    '" y="' + ((y + 0.5) * SCALE * ASPECT + 2) +
+                    '" width="' + (SCALE - 2) + '" height="' + (SCALE * ASPECT - 2) +
+                    '" fill="';
                 if (grid.isUsed(x, y)) {
                     svg += 'red';
                 } else if (grid(x, y) === ' ') {
@@ -1378,7 +1404,10 @@ function diagramToSVG(diagramString, options) {
             for (var x = 0; x < grid.width; ++x) {
                 var c = grid(x, y);
                 if (/[\u2B22\u2B21]/.test(c)) {
-                    svg += '<text x="' + (x * SCALE) + '" y="' + (4 + y * SCALE * ASPECT) + '"' + TEXT_COLOR + ' font-size="20.5px">' + escapeHTMLEntities(c) + '</text>\n';
+                    svg += '<text x="' + ((x + 1) * SCALE) +
+                        '" y="' + (4 + (y + 1) * SCALE * ASPECT) +
+                        '"' + TEXT_COLOR + ' font-size="20.5px">' +
+                        escapeHTMLEntities(c) + '</text>\n';
                     grid.setUsed(x, y);
                 }
             } // x
@@ -1388,12 +1417,14 @@ function diagramToSVG(diagramString, options) {
             while (x < grid.width) {
                 let t = grid.text(x, y);
                 let s = t.join('');
-                svg += '<text x="' + ((x + (t.length / 2) - 0.5) * SCALE) + '" y="' + (4 + y * SCALE * ASPECT);
+                svg += '<text x="' + ((x + (t.length / 2) + 0.5) * SCALE) +
+                    '" y="' + (4 + (y + 1) * SCALE * ASPECT);
                 if (options.spaces > 2 && s.indexOf('  ') >= 0) {
                     svg += '" xml:space="preserve'
                 }
                 if (options.stretch) {
-                    svg += '" textLength="' + (t.length * SCALE) + '" lengthAdjust="spacingAndGlyphs';
+                    svg += '" textLength="' + (t.length * SCALE) +
+                        '" lengthAdjust="spacingAndGlyphs';
                 }
                 svg += '">' + escapeHTMLEntities(s) + '</text>\n';
                 x = grid.textStart(x + t.length, y);
@@ -1403,20 +1434,22 @@ function diagramToSVG(diagramString, options) {
     }
 
     if (options.source) {
-        // Offset the characters a little for easier viewing
-        svg += '<g class="source" transform="translate(2,2)">\n';
+        svg += '<g class="source" fill="red" font-size="12px">\n';
         for (var y = 0; y < grid.height; ++y) {
             for (var x = 0; x < grid.width; ++x) {
                 var c = grid(x, y);
                 if (c !== ' ') {
-                    svg += '<text x="' + (x * SCALE) + '" y="' + (4 + y * SCALE * ASPECT) + '" fill="red" font-size="12px">' + escapeHTMLEntities(c) + '</text>';
+                    // Offset the characters by 2 for easier viewing
+                    svg += '<text x="' + ((x + 1) * SCALE + 2) +
+                        '" y="' + (6 + (y + 1) * SCALE * ASPECT) +
+                        '">' + escapeHTMLEntities(c) + '</text>';
                 } // if
             } // x
         } // y
         svg += '</g>';
     } // if
 
-    svg += '</g></svg>';
+    svg += '</svg>';
 
     return unhideMarkers(svg);
 }
