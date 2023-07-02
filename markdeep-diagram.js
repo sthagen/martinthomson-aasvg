@@ -737,7 +737,7 @@ function diagramToSVG(diagramString, options) {
                 const STROKE = {
                     'closed': '',
                     'open': ' stroke="black"',
-                    'dotted': ' stroke="black" stroke-dasharray="1,1"',
+                    'dotted': ' stroke="black" stroke-dasharray="0,1.8"',
                     'shaded': ' stroke="black"',
                     'xor': ' stroke="black"',
                 };
@@ -1430,6 +1430,7 @@ function diagramToSVG(diagramString, options) {
         'text-anchor': 'middle',
         'font-family': 'monospace',
         'font-size': (SCALE * 13 / 8).toString() + 'px',
+        'stroke-linecap': 'round',
     };
     Object.keys(DEFAULT_ATTRS).forEach(k => {
         if (!attrs[k]) { attrs[k] = DEFAULT_ATTRS[k]; }
