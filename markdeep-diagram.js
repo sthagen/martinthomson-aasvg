@@ -178,9 +178,10 @@ function diagramToSVG(diagramString, options) {
 
     var DECORATION_CHARACTERS = ARROW_HEAD_CHARACTERS + POINT_CHARACTERS + JUMP_CHARACTERS + GRAY_CHARACTERS + TRI_CHARACTERS;
 
-    function isUndirectedVertex(c) { return UNDIRECTED_VERTEX_CHARACTERS.indexOf(c) + 1; }
+    function isUndirectedVertex(c) { return UNDIRECTED_VERTEX_CHARACTERS.indexOf(c) !== -1; }
     function isVertex(c) { return VERTEX_CHARACTERS.indexOf(c) !== -1; }
     function isTopVertex(c) { return isUndirectedVertex(c) || (c === '.') || (c === ','); }
+    function isTopVertexOrDecoration(c) { return isTopVertex(c) || (c === '^'); }
     function isBottomVertex(c) { return isUndirectedVertex(c) || (c === "'") || (c === '`'); }
     function isVertexOrLeftDecoration(c) { return isVertex(c) || (c === '<') || isPoint(c); }
     function isVertexOrRightDecoration(c) { return isVertex(c) || (c === '>') || isPoint(c); }
@@ -329,9 +330,9 @@ function diagramToSVG(diagramString, options) {
 
             if (f(c)) {
                 // Looks like a vertical line...does it continue?
-                return (isTopVertex(up) || (up === '^') || f(up) || isJump(up) ||
+                return (isTopVertexOrDecoration(up) || f(up) || isJump(up) ||
                     isBottomVertex(dn) || (dn === 'v') || f(dn) || isJump(dn) ||
-                    isPoint(up) || isPoint(dn) || (grid(x, y - 1) === '_') || (uplt === '_') ||
+                    isPoint(up) || isPoint(dn) || (up === '_') || (uplt === '_') ||
                     (uprt === '_') ||
                     // Special case of 1-high vertical on two curved corners
                     ((isTopVertex(uplt) || isTopVertex(uprt)) &&
@@ -377,11 +378,9 @@ function diagramToSVG(diagramString, options) {
                 }
 
             } else if (c === '<') {
-                return f(rt) && f(rtrt)
-
+                return f(rt) && f(rtrt);
             } else if (c === '>') {
                 return f(lt) && f(ltlt);
-
             } else if (isVertex(c)) {
                 return ((f(lt) && f(ltlt)) || (f(rt) && f(rtrt)));
             }
@@ -804,7 +803,7 @@ function diagramToSVG(diagramString, options) {
         // so that we never hit the same line twice
         for (var x = 0; x < grid.width; ++x) {
             for (var y = 0; y < grid.height; ++y) {
-                function vline(p, boxt, boxb, style) {
+                function vline(p, alt, boxt, boxb, style) {
                     if (grid[p](x, y)) {
                         // This character begins a vertical line...now, find the end
                         var A = Vec2(x, y);
@@ -818,16 +817,18 @@ function diagramToSVG(diagramString, options) {
                             (boxt.indexOf(upup) >= 0) ||
                             (grid(A.x - 1, A.y - 1) === '_') ||
                             (grid(A.x + 1, A.y - 1) === '_') ||
-                            isBottomVertex(upup)) || isJump(upup)) {
+                            isBottomVertex(upup)) || isJump(upup) ||
+                            (grid[alt](A.x, A.y - 1) && !isVertex(upup))) {
                             // Stretch up to almost reach the line above (if there is a decoration,
                             // it will finish the gap)
-                            A.y -= 0.5;
+                            A.y -= (isVertex(upup) && grid[alt](A.x, A.y - 2) && !isTopVertexOrDecoration(up)) ? 1 : 0.5;
                         }
 
                         var dn = grid(B);
                         var dndn = grid(B.x, B.y + 1);
                         if (!isVertex(dn) && ((dndn === '-') || (boxb.indexOf(dndn) >= 0) || isTopVertex(dndn)) || isJump(dndn) ||
-                            (grid(B.x - 1, B.y) === '_') || (grid(B.x + 1, B.y) === '_')) {
+                            (grid(B.x - 1, B.y) === '_') || (grid(B.x + 1, B.y) === '_') ||
+                            (grid[alt](B.x, B.y + 1) && !isVertex(dn))) {
                             // Stretch down to almost reach the line below
                             B.y += 0.5;
                         }
@@ -835,15 +836,20 @@ function diagramToSVG(diagramString, options) {
                         // Don't insert degenerate lines
                         if ((A.x !== B.x) || (A.y !== B.y)) {
                             pathSet.insert(new Path(A, B, null, null, style));
+                            // Re-evaluate the character we just rejected.
+                            --y;
                             return true;
                         }
-                        // Continue the search from the end value y+1
+
+                        // Continue the search from y+1.
                     }
                     return false;
                 }
 
-                if (vline("isSolidVLineAt", '\u2564', '\u2567') ||
-                    vline("isDoubleVLineAt", '\u2565\u2566', '\u2568\u2569', "double")) { continue; }
+                if (vline("isSolidVLineAt", "isDoubleVLineAt", '\u2564', '\u2567') ||
+                    vline("isDoubleVLineAt", "isSolidVLineAt", '\u2565\u2566', '\u2568\u2569', "double")) {
+                    continue;
+                }
 
                 // Some very special patterns for the short lines needed on
                 // circuit diagrams. Only invoke these if not also on a curve
@@ -887,7 +893,7 @@ function diagramToSVG(diagramString, options) {
         // Find all solid horizontal lines
         for (var y = 0; y < grid.height; ++y) {
             for (var x = 0; x < grid.width; ++x) {
-                function hline(p, boxl, boxr, style) {
+                function hline(p, alt, boxl, boxr, style) {
                     if (grid[p](x, y)) {
                         // Begins a line...find the end
                         var A = Vec2(x, y);
@@ -903,27 +909,42 @@ function diagramToSVG(diagramString, options) {
                             ((isTopVertex(grid(A)) && isSolidVLineOrJumpOrPoint(grid(A.x - 1, A.y + 1))) ||
                                 (isBottomVertex(grid(A)) && isSolidVLineOrJumpOrPoint(grid(A.x - 1, A.y - 1))))) {
                             ++A.x;
+                        } else if (!isVertexOrLeftDecoration(grid(A)) &&
+                            isVertex(grid(A.x - 1, A.y)) &&
+                            grid[alt](A.x - 2, A.y)) {
+                            // Line continuation, changing type.
+                            --A.x;
+                        } else if (grid[alt](A.x - 1, A.y) &&
+                            !isVertexOrRightDecoration(grid(A.x - 1, A.y)) &&
+                            !isVertex(grid(A))) {
+                            A.x -= 0.5;
                         }
 
                         if (!isVertex(grid(B.x + 1, B.y)) &&
                             ((isTopVertex(grid(B)) && isSolidVLineOrJumpOrPoint(grid(B.x + 1, B.y + 1))) ||
                                 (isBottomVertex(grid(B)) && isSolidVLineOrJumpOrPoint(grid(B.x + 1, B.y - 1))))) {
                             --B.x;
+                        } else if (grid[alt](B.x + 1, B.y) &&
+                            !isVertexOrLeftDecoration(grid(B.x + 1, B.y)) &&
+                            !isVertex(grid(B))) {
+                            B.x += 0.5;
                         }
 
                         // Only insert non-degenerate lines
                         if ((A.x !== B.x) || (A.y !== B.y)) {
                             pathSet.insert(new Path(A, B, null, null, style));
+                            // Re-evaluate the character we just rejected.
+                            --x;
                             return true;
                         }
 
-                        // Continue the search from the end x+1
+                        // Continue the search from x+1.
                     }
                     return false;
                 }
 
-                hline("isSolidHLineAt", '\u2523', '\u252b', null) ||
-                    hline("isDoubleHLineAt", '\u255E', '\u2561', "double");
+                hline("isSolidHLineAt", "isDoubleHLineAt", '\u2523', '\u252b', null) ||
+                    hline("isDoubleHLineAt", "isSolidHLineAt", '\u255E', '\u2561', "double");
             }
         } // y
 
