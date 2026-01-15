@@ -143,6 +143,7 @@ function hideMarkers(s) {
 function diagramToSVG(diagramString, options) {
     // Clean up diagramString
     diagramString = equalizeLineLengths(removeLeadingSpace(diagramString));
+    const originalString = diagramString;
     options = options || {};
     if (!Number.isInteger(options.spaces)) { options.spaces = 2; } // 0 is valid so falsy tests fail.
 
@@ -195,7 +196,7 @@ function diagramToSVG(diagramString, options) {
     function isDoubleHLine(c) { return (c === '=') || (c === '\u2550') || isUndirectedVertex(c) || isJump(c); }
     function isSolidVLineOrJumpOrPoint(c) { return isSolidVLine(c) || isJump(c) || isPoint(c); }
     function isSolidVLine(c) { return (c === '|') || (c === '\u2503') || isUndirectedVertex(c); }
-    function isDoubleVLine(c) { return (c === '\u2551') || isUndirectedVertex(c); }
+    function isDoubleVLine(c) { return (c === '\u2551') || (c === '\u2016') || isUndirectedVertex(c); }
     function isSolidDLine(c) { return (c === '/') || isUndirectedVertex(c) }
     function isSolidBLine(c) { return (c === '\\') || isUndirectedVertex(c); }
     function isJump(c) { return JUMP_CHARACTERS.indexOf(c) + 1; }
@@ -1491,6 +1492,12 @@ function diagramToSVG(diagramString, options) {
     let svg = '<svg ' + Object.keys(attrs)
         .filter(k => typeof attrs[k] === 'string')
         .map(k => k + '="' + escapeHTMLEntities(attrs[k]) + '"').join(' ') + '>\n';
+
+    if (options.embed) {
+        svg += '<text class="ascii" display="none"><![CDATA[\n'
+            + originalString.split("\n").map(line => line.trimEnd()).join("\n")
+            + ']]></text>\n';
+    }
 
     if (options.backdrop) {
         svg += '<rect class="backdrop" x="0" y="0" width="' + ((grid.width + 1) * SCALE)
