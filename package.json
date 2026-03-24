@@ -1,11 +1,13 @@
 {
   "name": "aasvg",
-  "version": "0.4.3",
+  "version": "0.5.1",
   "description": "Turn ASCII art diagrams into SVG",
-  "bin": "./main.js",
+  "bin": {
+    "aasvg": "main.js"
+  },
   "repository": {
     "type": "git",
-    "url": "https://github.com/martinthomson/aasvg"
+    "url": "git+https://github.com/martinthomson/aasvg.git"
   },
   "keywords": [
     "ascii",
@@ -27,7 +29,7 @@
     "README.md"
   ],
   "scripts": {
-    "test": "set -e;[ \"aasvg $(jq -r .version <package.json)\" = \"$(./main.js --version)\" ];svg=$(mktemp); trap \"rm $svg\" EXIT;./main.js --backdrop <example.txt >\"$svg\"; diff -u example.svg \"$svg\"",
+    "test": "set -e;[ \"aasvg $(jq -r .version <package.json)\" = \"$(./main.js version)\" ];svg=$(mktemp); trap \"rm $svg\" EXIT;./main.js backdrop <example.txt >\"$svg\"; diff -u example.svg \"$svg\"",
     "release": "set -e;npm run test;t=\"v$(jq -r .version <package.json)\"; git tag \"$t\"; git push origin \"$t\";npm publish"
   },
   "dependencies": {}

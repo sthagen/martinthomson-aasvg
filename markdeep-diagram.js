@@ -14,10 +14,7 @@
 'use strict';
 
 // Mappings and constants used by markdeep.
-const STROKE_WIDTH = 2;
-const ARROW_COLOR = ' fill="black"'; // + ' stroke="none"', but xml2rfc doesn't like that.
-const STROKE_COLOR = ' fill="none" stroke="black"';
-const TEXT_COLOR = ' stroke="black"';
+const STROKE_WIDTH = 1; // SVG default
 ['min', 'max', 'abs', 'sign'].forEach(f => {
     global[f] = Math[f];
 });
@@ -146,6 +143,7 @@ function diagramToSVG(diagramString, options) {
     const originalString = diagramString;
     options = options || {};
     if (!Number.isInteger(options.spaces)) { options.spaces = 2; } // 0 is valid so falsy tests fail.
+    options.arrow ??= 'solid';
 
     // Temporarily replace 'o', 'v', and 'V' if they are surrounded by other
     // text. Use another character to avoid processing them as decorations.
@@ -205,6 +203,7 @@ function diagramToSVG(diagramString, options) {
 
     ///////////////////////////////////////////////////////////////////////////////
     // Math library
+    function fivePlaces(x) { return x.toFixed(5).replace(/\.?0*$/, ''); }
 
     /** Invoke as new Vec2(v) to clone or new Vec2(x, y) to create from coordinates.
         Can also invoke without new for brevity. */
@@ -224,8 +223,7 @@ function diagramToSVG(diagramString, options) {
 
     /** Returns coordinates */
     Vec2.prototype.coords = function () {
-        function s(x) { return x.toFixed(5).replace(/\.?0*$/, ''); }
-        return s((this.x + 1) * SCALE) + ',' + s((this.y + 1) * SCALE * ASPECT);
+        return fivePlaces((this.x + 1) * SCALE) + ',' + fivePlaces((this.y + 1) * SCALE * ASPECT);
     }
     /** Returns an SVG representation, with a trailing space */
     Vec2.prototype.toString = Vec2.prototype.toSVG =
@@ -259,6 +257,10 @@ function diagramToSVG(diagramString, options) {
         str = strToArray(str);
         grid.width = str.indexOf('\n');
 
+        grid.hasText = function () {
+            return str.some((x, i) => !(x === ' ' || x === '\n') && !grid._used[i]);
+        }
+
         grid.v = function (x, y) {
             return ((x >= 0) && (x < grid.width) && (y >= 0) && (y < grid.height)) ?
                 str[y * (grid.width + 1) + x] : ' ';
@@ -281,7 +283,7 @@ function diagramToSVG(diagramString, options) {
                 if (x instanceof Vec2) { y = x.y; x = x.x; }
                 else { throw new Error('grid requires either a Vec2 or (x, y)'); }
             }
-            return (this._used[y * (this.width + 1) + x] === true);
+            return !!this._used[y * (this.width + 1) + x];
         };
 
         /** Returns the x offset of the next run of text on the line;
@@ -342,9 +344,11 @@ function diagramToSVG(diagramString, options) {
 
             } else if (isTopVertex(c) || (c === '^')) {
                 // May be the top of a vertical line
-                return f(dn) || (isJump(dn) && (c !== '.'));
+                return (f(dn) || (isJump(dn) && (c !== '.'))) &&
+                    (c !== '^' || (up !== 'v' && up !== 'V'));
             } else if (isBottomVertex(c) || (c === 'v' || c === 'V')) {
-                return f(up) || (isJump(up) && (c !== "'"));
+                return f(up) || (isJump(up) && (c !== "'")) ||
+                    ((up === 'v' || up === 'V') && f(grid(x, y - 2)));
             } else if (isPoint(c)) {
                 return f(up) || f(dn);
             }
@@ -380,9 +384,9 @@ function diagramToSVG(diagramString, options) {
                 }
 
             } else if (c === '<') {
-                return f(rt) && f(rtrt);
+                return f(rt) && f(rtrt) && (lt !== '>');
             } else if (c === '>') {
-                return f(lt) && f(ltlt);
+                return f(ltlt) && (f(lt) || (lt === '>'));
             } else if (isVertex(c)) {
                 return ((f(lt) && f(ltlt)) || (f(rt) && f(rtrt)));
             }
@@ -492,7 +496,10 @@ function diagramToSVG(diagramString, options) {
         this.double = style === 'double' || false;
         this.squiggle = style === 'squiggle' || false;
 
-        Object.freeze(this);
+        this.arrowAtA = null;
+        this.arrowAtB = null;
+        this.arrowTipAtA = null;
+        this.arrowTipAtB = null;
     }
 
     var _ = Path.prototype;
@@ -612,17 +619,104 @@ function diagramToSVG(diagramString, options) {
             (max(this.A.x, this.B.x) >= x);
     }
 
+    /** Mark that an arrowhead is at endpoint A or B matching (x, y).
+     *  type is 'end' (arrowhead terminates the path) or 'cont' (arrowhead passes through).
+     *  tip is the Vec2 position of the arrowhead tip (accounting for arrow center and rotation). */
+    _.markArrowAt = function (x, y, type, tip) {
+        if (this.A.x === x && this.A.y === y) {
+            if (type !== 'cont' || this.arrowAtA !== 'end') {
+                this.arrowAtA = type;
+                this.arrowTipAtA = tip;
+            }
+        } else if (this.B.x === x && this.B.y === y) {
+            if (type !== 'cont' || this.arrowAtB !== 'end') {
+                this.arrowAtB = type;
+                this.arrowTipAtB = tip;
+            }
+        }
+    };
+
+    /** Mark that an arrowhead passes through this path, pointing toward the right endpoint */
+    _.markArrowContRight = function (tip) {
+        if (this.A.x >= this.B.x) { this.markArrowAt(this.A.x, this.A.y, 'cont', tip); }
+        else { this.markArrowAt(this.B.x, this.B.y, 'cont', tip); }
+    };
+
+    /** Mark that an arrowhead passes through this path, pointing toward the left endpoint */
+    _.markArrowContLeft = function (tip) {
+        if (this.A.x <= this.B.x) { this.markArrowAt(this.A.x, this.A.y, 'cont', tip); }
+        else { this.markArrowAt(this.B.x, this.B.y, 'cont', tip); }
+    };
+
+    /** Mark that an arrowhead passes through this path, pointing toward the upper endpoint */
+    _.markArrowContUp = function (tip) {
+        if (this.A.y <= this.B.y) { this.markArrowAt(this.A.x, this.A.y, 'cont', tip); }
+        else { this.markArrowAt(this.B.x, this.B.y, 'cont', tip); }
+    };
+
+    /** Mark that an arrowhead passes through this path, pointing toward the lower endpoint */
+    _.markArrowContDown = function (tip) {
+        if (this.A.y >= this.B.y) { this.markArrowAt(this.A.x, this.A.y, 'cont', tip); }
+        else { this.markArrowAt(this.B.x, this.B.y, 'cont', tip); }
+    };
+
+    // 1.5 is the length, 0.35 is the offset from the central line for an the arrowhead.
+    // Rather than drawa the line to the end of the arrow, we need to pull it back slightly
+    // to account for its width.  Otherwise, we get a round blob on the end.
+    //  ---    .
+    //   ^     | `-._
+    //  0.35   |     `-._
+    //   v  ---+---------`-._ 
+    //  ---      line  •  )  _>
+    //      ---+---------.-' 
+    //         |      .-'
+    //         :
+    //         |<---- 1.5 ---->|
+    // That means moving the dot back from the end by STROKE_WIDTH/2.
+    // Plus the extra needed to account for the curvature of the round end.
+    // The stroke end is a circle that is tangential to the arrowhead.
+    const ARROWHEAD_HALF_BASE = 0.35;
+    const ARROWHEAD_LENGTH = 1.5;
+    const ARROWHEAD_SCALE = ARROWHEAD_LENGTH / ARROWHEAD_HALF_BASE;
+    const LINE_WIDTH_ADJUST = STROKE_WIDTH / 2 * (1 + Math.sqrt(1 + (ASPECT / ARROWHEAD_SCALE) ** 2));
+
     _.offsetLine = function (dx, dy) {
-        let svg = '<path d="M ' + this.A.offset(dx, dy);
+        // Unit vector in SVG pixel space, normalized by SVG-space distance (accounts for aspect ratio).
+        // ux, uy are the per-SVG-pixel step in grid coordinates.
+        let vx = this.B.x - this.A.x;
+        let vy = this.B.y - this.A.y;
+        let s_asp = Math.sqrt(vx ** 2 + (vy * ASPECT) ** 2);
+        let ux = vx / (s_asp * SCALE);
+        let uy = vy / (s_asp * SCALE);
+
+        // SVG-space perpendicular offset of this stroke from the path centre.
+        // For an offset (double-line) stroke the outer edge must fit inside the arrowhead,
+        // requiring extra pullback of d_SVG * ARROWHEAD_SCALE / ASPECT SVG pixels
+        // (= d_SVG / tan(half-angle) in SVG space, where half-angle is the arrowhead slope).
+        // Applying via ux/uy (which carry the inverse ASPECT factor) keeps the result correct
+        // for both horizontal and vertical paths without any special-casing.
+        const d_SVG = SCALE * Math.sqrt(dx ** 2 + (dy * ASPECT) ** 2);
+        const adjust = LINE_WIDTH_ADJUST + d_SVG * ARROWHEAD_SCALE / ASPECT;
+
+        let a = (this.arrowTipAtA ?? this.A).offset(dx, dy);
+        if (this.arrowTipAtA && this.arrowAtA !== 'none') {
+            // Move the stroke endpoint toward B by adjust SVG pixels so the round cap
+            // is tangent to (and hidden inside) the arrowhead body.
+            a = a.offset(ux * adjust, uy * adjust);
+        }
+        let svg = '<path d="M ' + a.coords();
         if (this.isCurved()) {
-            let c =
-                svg += 'C ' + this.C.offset(dx, dy) + this.D.offset(dx, dy);
+            svg += 'C ' + this.C.offset(dx, dy) + this.D.offset(dx, dy);
         } else {
             svg += 'L ';
         }
-        svg += this.B.offset(dx, dy).coords() + '"' + STROKE_COLOR;
+        let b = (this.arrowTipAtB ?? this.B).offset(dx, dy);
+        if (this.arrowTipAtB && this.arrowAtB !== 'none') {
+            b = b.offset(-ux * adjust, -uy * adjust);
+        }
+        svg += b.coords() + '"';
         if (this.dashed) {
-            svg += ' stroke-dasharray="3,6"';
+            svg += ' class="dashed"';
         }
         svg += '/>';
         return svg;
@@ -630,19 +724,37 @@ function diagramToSVG(diagramString, options) {
 
     _.horizontalSquiggle = function (x0, x1, y) {
         const SQUIGGLE_AMPLITUDE = 0.2;
+        const H_LEN = 0.5 * SCALE - LINE_WIDTH_ADJUST;
 
-        let svg = '<path d="M ' + this.A.coords() + ' ';
-        let start = this.A.offset(0, 0);
+        let svg = '<path d="M '
+        let skip = false;
+        let start = (this.arrowTipAtA ?? this.A).offset(0, 0);
+        if (this.arrowTipAtA && this.arrowAtA !== 'none') {
+            let a_prime = this.arrowTipAtA.offset(LINE_WIDTH_ADJUST / SCALE, 0);
+            svg += a_prime.coords() + ' h ' + H_LEN + ' ';
+            skip = true;
+        } else {
+            svg += this.A.coords() + ' ';
+        }
         for (let x = x0; x < x1; x++) {
             let up = start.offset(0.25, -SQUIGGLE_AMPLITUDE);
             let mid = up.offset(0.25, SQUIGGLE_AMPLITUDE);
             let down = mid.offset(0.25, SQUIGGLE_AMPLITUDE);
-            start = down.offset(0.25, -SQUIGGLE_AMPLITUDE);
+            let end = down.offset(0.25, -SQUIGGLE_AMPLITUDE);
 
-            svg += 'Q ' + up + mid;
-            svg += 'Q ' + down + start;
+            if (skip) {
+                skip = false;
+            } else {
+                svg += 'Q ' + up + mid;
+            }
+            if (end.x >= this.B.x && this.arrowAtB) {
+                svg += 'h ' + H_LEN;
+            } else {
+                svg += 'Q ' + down + end;
+            }
+            start = end;
         }
-        svg += '"' + STROKE_COLOR + '/>';
+        svg += '"/>';
         return svg;
     }
 
@@ -650,13 +762,13 @@ function diagramToSVG(diagramString, options) {
     _.toSVG = function () {
         let svg = '';
         if (this.double) {
-            let vx = this.B.x - this.A.x;
-            let vy = this.B.y - this.A.y;
-            let s = Math.sqrt(vx * vx + vy * vy);
-            vx /= s * SCALE;
-            vy /= s * SCALE / ASPECT;
-            svg += this.offsetLine(vy, -vx);
-            svg += this.offsetLine(-vy, vx);
+            let dx = this.B.x - this.A.x;
+            let dy = this.B.y - this.A.y;
+            let s = Math.sqrt(dx ** 2 + dy ** 2);
+            dx /= s * SCALE;
+            dy /= s * SCALE / ASPECT;
+            svg += this.offsetLine(dy, -dx);
+            svg += this.offsetLine(-dy, dx);
         } else if (this.squiggle) {
             if (this.B.y !== this.A.y) {
                 console.warn("warning: squiggle requested for non-horizontal line");
@@ -665,7 +777,6 @@ function diagramToSVG(diagramString, options) {
         } else {
             svg = this.offsetLine(0, 0);
         }
-
         return svg;
     };
 
@@ -708,6 +819,27 @@ function diagramToSVG(diagramString, options) {
     PS.verticalPassesThrough = makeFilterAny(_.verticalPassesThrough);
     PS.horizontalPassesThrough = makeFilterAny(_.horizontalPassesThrough);
 
+    /** Returns a new method that returns the first path where method(x, y) is true */
+    function makeFilterFind(method) {
+        return function (x, y) {
+            for (var i = 0; i < this._pathArray.length; ++i) {
+                if (method.call(this._pathArray[i], x, y)) { return this._pathArray[i]; }
+            }
+            return null;
+        }
+    }
+
+    PS.findUpEndsAt = makeFilterFind(_.upEndsAt);
+    PS.findDownEndsAt = makeFilterFind(_.downEndsAt);
+    PS.findLeftEndsAt = makeFilterFind(_.leftEndsAt);
+    PS.findRightEndsAt = makeFilterFind(_.rightEndsAt);
+    PS.findDiagonalUpEndsAt = makeFilterFind(_.diagonalUpEndsAt);
+    PS.findDiagonalDownEndsAt = makeFilterFind(_.diagonalDownEndsAt);
+    PS.findBackDiagonalUpEndsAt = makeFilterFind(_.backDiagonalUpEndsAt);
+    PS.findBackDiagonalDownEndsAt = makeFilterFind(_.backDiagonalDownEndsAt);
+    PS.findHorizontalPassesThrough = makeFilterFind(_.horizontalPassesThrough);
+    PS.findVerticalPassesThrough = makeFilterFind(_.verticalPassesThrough);
+
     /** Returns an SVG string */
     PS.toSVG = function () {
         var svg = '';
@@ -720,13 +852,18 @@ function diagramToSVG(diagramString, options) {
 
     function DecorationSet() {
         this._decorationArray = [];
+        this._types = new Set();
     }
 
     var DS = DecorationSet.prototype;
 
+    DS.has = function (typelist) {
+        return Array.prototype.some.call(typelist, t => this._types.has(t));
+    }
+
     /** insert(x, y, type, <angle>)
         insert(vec, type, <angle>)
-
+ 
         angle is the angle in degrees to rotate the result */
     DS.insert = function (x, y, type, angle) {
         if (type === undefined) { type = y; y = x.y; x = x.x; }
@@ -743,8 +880,22 @@ function diagramToSVG(diagramString, options) {
         } else {
             this._decorationArray.unshift(d);
         }
+        this._types.add(type);
     };
 
+    // Compute offsets for line arrows.
+    // Shift each side inward by W=STROKE_WIDTH/2 SVG px (perpendicular to the side)
+    // so the outer edge of the stroke aligns with the solid polygon boundary.
+    // H_SVG/L_SVG: half-base/length in SVG px; SL_SVG: side length in SVG px.
+    const W = STROKE_WIDTH / 2;
+    const H_SVG = ARROWHEAD_HALF_BASE * SCALE * ASPECT;
+    const L_SVG = ARROWHEAD_LENGTH * SCALE;
+    const SL_SVG = Math.sqrt(L_SVG ** 2 + H_SVG ** 2);
+    // dx_base/dy_base: grid-coord displacement of base corners toward the axis.
+    // dx_tip: grid-x pullback of the tip (intersection of the two inset sides).
+    const ARROWHEAD_LINE_BASE_DX = W * H_SVG / (SL_SVG * SCALE);
+    const ARROWHEAD_LINE_BASE_DY = W * L_SVG / (SL_SVG * SCALE * ASPECT);
+    const ARROWHEAD_LINE_TIP_DX = W * SL_SVG / (H_SVG * SCALE);
 
     DS.toSVG = function () {
         var svg = '';
@@ -760,33 +911,22 @@ function diagramToSVG(diagramString, options) {
                 var cup = Vec2(C.x + dx, C.y - 0.5);
                 var cdn = Vec2(C.x + dx, C.y + 0.5);
 
-                svg += '<path class="jump" d="M ' + dn + 'C ' + cdn + cup + up.coords() + '"' + STROKE_COLOR + '/>';
+                svg += '<path class="jump" d="M ' + dn + 'C ' + cdn + cup + up.coords() + '"/>';
 
             } else if (isPoint(decoration.type)) {
                 const CLASSES = { '*': 'closed', 'o': 'open', '◌': 'dotted', '○': 'open', '◍': 'shaded', '●': 'closed', '⊕': 'xor' };
-                const FILL = { 'closed': 'black', 'open': 'white', 'dotted': 'white', 'shaded': '#666', 'xor': 'white' };
-                const STROKE = {
-                    'closed': '',
-                    'open': ' stroke="black"',
-                    'dotted': ' stroke="black" stroke-dasharray="0,1.8"',
-                    'shaded': ' stroke="black"',
-                    'xor': ' stroke="black"',
-                };
                 var cls = CLASSES[decoration.type];
                 svg += '<circle cx="' + ((C.x + 1) * SCALE) + '" cy="' + ((C.y + 1) * SCALE * ASPECT) +
-                    '" r="' + (SCALE - STROKE_WIDTH) + '" class="' + cls + 'dot"' +
-                    ' fill="' + FILL[cls] + '"' + STROKE[cls] + '/>\n';
+                    '" r="' + (SCALE - STROKE_WIDTH) + '" class="dot ' + cls + '"/>\n';
                 if (decoration.type === '⊕') {
                     svg += '<line x1="' + ((C.x) * SCALE + STROKE_WIDTH) +
                         '" y1="' + ((C.y + 1) * SCALE * ASPECT) +
                         '" x2="' + ((C.x + 2) * SCALE - STROKE_WIDTH) +
-                        '" y2="' + ((C.y + 1) * SCALE * ASPECT) +
-                        '" stroke="black"/>';
+                        '" y2="' + ((C.y + 1) * SCALE * ASPECT) + '"/>';
                     svg += '<line x1="' + ((C.x + 1) * SCALE) +
                         '" y1="' + ((C.y + 1) * SCALE * ASPECT - SCALE + STROKE_WIDTH) +
                         '" x2="' + ((C.x + 1) * SCALE) +
-                        '" y2="' + ((C.y + 1) * SCALE * ASPECT + SCALE - STROKE_WIDTH) +
-                        '" stroke="black"/>';
+                        '" y2="' + ((C.y + 1) * SCALE * ASPECT + SCALE - STROKE_WIDTH) + '"/>';
                 }
             } else if (isGray(decoration.type)) {
                 var shade = Math.round((3 - GRAY_CHARACTERS.indexOf(decoration.type)) * 63.75);
@@ -802,13 +942,21 @@ function diagramToSVG(diagramString, options) {
                 var tip = Vec2(C.x + xs, C.y - ys);
                 var up = Vec2(C.x + xs, C.y + ys);
                 var dn = Vec2(C.x - xs, C.y + ys);
-                svg += '<polygon class="triangle" points="' + tip + up + dn.coords(4) + '"' + ARROW_COLOR + '/>\n';
+                svg += '<polygon class="triangle" points="' + tip + up + dn.coords(4) + '"/>\n';
             } else { // Arrow head
                 var tip = Vec2(C.x + 1, C.y);
-                var up = Vec2(C.x - 0.5, C.y - 0.35);
-                var dn = Vec2(C.x - 0.5, C.y + 0.35);
-                svg += '<polygon class="arrowhead" points="' + tip + up + dn.coords() + '"' + ARROW_COLOR +
-                    ' transform="rotate(' + decoration.angle + ',' + C.coords() + ')"/>\n';
+                var up = Vec2(C.x + 1 - ARROWHEAD_LENGTH, C.y - ARROWHEAD_HALF_BASE);
+                var dn = Vec2(C.x + 1 - ARROWHEAD_LENGTH, C.y + ARROWHEAD_HALF_BASE);
+                if (options.arrow === 'line') {
+                    tip = tip.offset(-ARROWHEAD_LINE_TIP_DX, 0);
+                    up = up.offset(-ARROWHEAD_LINE_BASE_DX, ARROWHEAD_LINE_BASE_DY);
+                    dn = dn.offset(-ARROWHEAD_LINE_BASE_DX, -ARROWHEAD_LINE_BASE_DY);
+                    svg += '<path class="arrowhead" d="M ' + up + 'L ' + tip + 'L ' + dn.coords() +
+                        '" transform="rotate(' + fivePlaces(decoration.angle) + ',' + C.coords() + ')"/>\n';
+                } else {
+                    svg += '<polygon class="arrowhead" points="' + tip + up + dn.coords() +
+                        '" transform="rotate(' + fivePlaces(decoration.angle) + ',' + C.coords() + ')"/>\n';
+                }
             }
         }
         return svg;
@@ -836,7 +984,8 @@ function diagramToSVG(diagramString, options) {
         for (var x = 0; x < grid.width; ++x) {
             for (var y = 0; y < grid.height; ++y) {
                 function vline(p, alt, boxt, boxb, style) {
-                    if (grid[p](x, y)) {
+                    if (grid[p](x, y) ||
+                        (grid(x, y) === '^' && (grid(x, y - 1) === 'v' || grid(x, y - 1) === 'V'))) {
                         // This character begins a vertical line...now, find the end
                         var A = Vec2(x, y);
                         do { grid.setUsed(x, y); ++y; } while (grid[p](x, y));
@@ -926,7 +1075,7 @@ function diagramToSVG(diagramString, options) {
         for (var y = 0; y < grid.height; ++y) {
             for (var x = 0; x < grid.width; ++x) {
                 function hline(p, boxl, boxr, style) {
-                    if (grid[p](x, y)) {
+                    if (grid[p](x, y) || (grid(x, y) === '<' && grid(x - 1, y) === '>')) {
                         // Begins a line...find the end
                         var A = Vec2(x, y);
                         do { grid.setUsed(x, y); ++x; } while (grid[p](x, y));
@@ -1170,17 +1319,32 @@ function diagramToSVG(diagramString, options) {
                 //   .  .   .  .
                 //  (  o     )  o
                 //   '  .   '  '
-                if (((c === ')') || isPoint(c)) && (grid(x - 1, y - 1) === '.') && (grid(x - 1, y + 1) === "\'")) {
+                // Left curve:
+                if ((c === '(') && (grid(x + 1, y - 1) === '.') && (grid(x + 1, y + 1) === "\'")) {
+                    grid.setUsed(x, y); grid.setUsed(x + 1, y - 1); grid.setUsed(x + 1, y + 1);
+                    pathSet.insert(new Path(Vec2(x + 2, y - 1), Vec2(x + 2, y + 1),
+                        Vec2(x - 0.6, y - 1), Vec2(x - 0.6, y + 1)));
+                }
+                if (isPoint(c) && (grid(x + 1, y - 1) === '.') && (grid(x + 1, y + 1) === "\'") &&
+                    !grid.isUsed(x + 1, y - 1) && !grid.isUsed(x + 1, y + 1)) {
+                    grid.setUsed(x, y); grid.setUsed(x + 1, y - 1); grid.setUsed(x + 1, y + 1);
+                    pathSet.insert(new Path(Vec2(x + 2, y - 1), Vec2(x + 2, y + 1),
+                        Vec2(x - 0.6, y - 1), Vec2(x - 0.6, y + 1)));
+                }
+
+                // Right curve:
+                if ((c === ')') && (grid(x - 1, y - 1) === '.') && (grid(x - 1, y + 1) === "\'")) {
+                    grid.setUsed(x, y); grid.setUsed(x - 1, y - 1); grid.setUsed(x - 1, y + 1);
+                    pathSet.insert(new Path(Vec2(x - 2, y - 1), Vec2(x - 2, y + 1),
+                        Vec2(x + 0.6, y - 1), Vec2(x + 0.6, y + 1)));
+                }
+                if (isPoint(c) && (grid(x - 1, y - 1) === '.') && (grid(x - 1, y + 1) === "\'") &&
+                    !grid.isUsed(x - 1, y - 1) && !grid.isUsed(x - 1, y + 1)) {
                     grid.setUsed(x, y); grid.setUsed(x - 1, y - 1); grid.setUsed(x - 1, y + 1);
                     pathSet.insert(new Path(Vec2(x - 2, y - 1), Vec2(x - 2, y + 1),
                         Vec2(x + 0.6, y - 1), Vec2(x + 0.6, y + 1)));
                 }
 
-                if (((c === '(') || isPoint(c)) && (grid(x + 1, y - 1) === '.') && (grid(x + 1, y + 1) === "\'")) {
-                    grid.setUsed(x, y); grid.setUsed(x + 1, y - 1); grid.setUsed(x + 1, y + 1);
-                    pathSet.insert(new Path(Vec2(x + 2, y - 1), Vec2(x + 2, y + 1),
-                        Vec2(x - 0.6, y - 1), Vec2(x - 0.6, y + 1)));
-                }
 
                 if (isBottomVertex(c)) {
                     //   |
@@ -1284,6 +1448,33 @@ function diagramToSVG(diagramString, options) {
     function findDecorations(grid, pathSet, decorationSet) {
         function isEmptyOrVertex(c) { return (c === ' ') || /[^a-zA-Z0-9]|[ov]/.test(c); }
 
+        /** Compute the tip position of an arrowhead with center (cx, cy) and rotation angle (degrees). */
+        function arrowTip(cx, cy, angle) {
+            let angle_rad = angle * Math.PI / 180;
+            return Vec2(cx + Math.cos(angle_rad), cy + Math.sin(angle_rad) / ASPECT);
+        }
+
+        /** Insert an arrowhead at (px, py) if pathSet[methodName] finds a path there.
+            Marks that endpoint and records setUsed at the current grid (x, y).
+            If companionMethod is provided, also marks the path on the other side of the
+            arrowhead (the path whose endpoint at (px, py) is the departure end, not the
+            arrival end) so its line endpoint is also adjusted to stop at the arrowhead tip.
+            Returns true if successful. */
+        function tryArrow(methodName, px, py, angle, companionMethod) {
+            var p = pathSet[methodName](px, py);
+            if (p) {
+                decorationSet.insert(px, py, '>', angle);
+                grid.setUsed(x, y);
+                const tip = arrowTip(px, py, angle);
+                p.markArrowAt(px, py, 'end', tip);
+                if (companionMethod) {
+                    var q = pathSet[companionMethod](px, py);
+                    if (q) q.markArrowAt(px, py, 'none', tip);
+                }
+            }
+            return !!p;
+        }
+
         /** Is the point in the center of these values on a line? Allow points that are vertically
             adjacent but not horizontally--they wouldn't fit anyway, and might be text. */
         function onLine(up, dn, lt, rt) {
@@ -1341,91 +1532,59 @@ function diagramToSVG(diagramString, options) {
                     const BACKOFF_Y = 0.5 / ASPECT;
                     var dx = 0;
                     var dy = 0;
-                    if ((c === '>') && (pathSet.rightEndsAt(x, y) ||
-                        pathSet.horizontalPassesThrough(x, y))) {
-                        if (isPoint(grid(x + 1, y))) {
-                            // Back up if connecting to a point so as to not
-                            // overlap it
-                            dx = -BACKOFF_X;
+                    if (c === '>') {
+                        var p = pathSet.findRightEndsAt(x, y);
+                        var q = !p ? pathSet.findHorizontalPassesThrough(x, y) : null;
+                        if (p || q) {
+                            if (isPoint(grid(x + 1, y)) || grid(x + 1, y) === '<' || grid(x + 1, y) === '>') { dx = -BACKOFF_X; }
+                            decorationSet.insert(x + dx, y, '>', 0);
+                            grid.setUsed(x, y);
+                            if (p) { p.markArrowAt(x, y, 'end', arrowTip(x + dx, y, 0)); } else { q.markArrowContRight(arrowTip(x + dx, y, 0)); }
                         }
-                        decorationSet.insert(x + dx, y, '>', 0);
-                        grid.setUsed(x, y);
-                    } else if ((c === '<') && (pathSet.leftEndsAt(x, y) ||
-                        pathSet.horizontalPassesThrough(x, y))) {
-                        if (isPoint(grid(x - 1, y))) {
-                            // Back up if connecting to a point so as to not
-                            // overlap it
-                            dx = BACKOFF_X;
+                    } else if (c === '<') {
+                        var p = pathSet.findLeftEndsAt(x, y);
+                        var q = !p ? pathSet.findHorizontalPassesThrough(x, y) : null;
+                        if (p || q) {
+                            if (isPoint(grid(x - 1, y)) || grid(x - 1, y) === '>' || grid(x - 1, y) === '<') { dx = BACKOFF_X; }
+                            decorationSet.insert(x + dx, y, '>', 180);
+                            grid.setUsed(x, y);
+                            if (p) { p.markArrowAt(x, y, 'end', arrowTip(x + dx, y, 180)); } else { q.markArrowContLeft(arrowTip(x + dx, y, 180)); }
                         }
-                        decorationSet.insert(x + dx, y, '>', 180);
-                        grid.setUsed(x, y);
                     } else if (c === '^') {
                         // Because of the aspect ratio, we need to look
                         // in two slots for the end of the previous line
-                        if (pathSet.upEndsAt(x, y - 0.5)) {
-                            decorationSet.insert(x, y - 0.5, '>', 270);
-                            grid.setUsed(x, y);
-                        } else if (pathSet.upEndsAt(x, y)) {
-                            decorationSet.insert(x, y, '>', 270);
-                            grid.setUsed(x, y);
-                        } else if (pathSet.diagonalUpEndsAt(x + 0.5, y - 0.5)) {
-                            decorationSet.insert(x + 0.5, y - 0.5, '>', 270 + DIAGONAL_ANGLE);
-                            grid.setUsed(x, y);
-                        } else if (pathSet.diagonalUpEndsAt(x + 0.25, y - 0.25)) {
-                            decorationSet.insert(x + 0.25, y - 0.25, '>', 270 + DIAGONAL_ANGLE);
-                            grid.setUsed(x, y);
-                        } else if (pathSet.diagonalUpEndsAt(x, y)) {
-                            decorationSet.insert(x, y, '>', 270 + DIAGONAL_ANGLE);
-                            grid.setUsed(x, y);
-                        } else if (pathSet.backDiagonalUpEndsAt(x, y)) {
-                            decorationSet.insert(x, y, c, 270 - DIAGONAL_ANGLE);
-                            grid.setUsed(x, y);
-                        } else if (pathSet.backDiagonalUpEndsAt(x - 0.5, y - 0.5)) {
-                            decorationSet.insert(x - 0.5, y - 0.5, c, 270 - DIAGONAL_ANGLE);
-                            grid.setUsed(x, y);
-                        } else if (pathSet.backDiagonalUpEndsAt(x - 0.25, y - 0.25)) {
-                            decorationSet.insert(x - 0.25, y - 0.25, c, 270 - DIAGONAL_ANGLE);
-                            grid.setUsed(x, y);
-                        } else if (pathSet.verticalPassesThrough(x, y)) {
+                        if (!tryArrow('findUpEndsAt', x, y - 0.5, 270, 'findDownEndsAt') &&
+                            !tryArrow('findUpEndsAt', x, y, 270, 'findDownEndsAt') &&
+                            !tryArrow('findDiagonalUpEndsAt', x + 0.5, y - 0.5, 270 + DIAGONAL_ANGLE) &&
+                            !tryArrow('findDiagonalUpEndsAt', x + 0.25, y - 0.25, 270 + DIAGONAL_ANGLE) &&
+                            !tryArrow('findDiagonalUpEndsAt', x, y, 270 + DIAGONAL_ANGLE) &&
+                            !tryArrow('findBackDiagonalUpEndsAt', x, y, 270 - DIAGONAL_ANGLE) &&
+                            !tryArrow('findBackDiagonalUpEndsAt', x - 0.5, y - 0.5, 270 - DIAGONAL_ANGLE) &&
+                            !tryArrow('findBackDiagonalUpEndsAt', x - 0.25, y - 0.25, 270 - DIAGONAL_ANGLE) &&
+                            pathSet.verticalPassesThrough(x, y)) {
                             // Only try this if all others failed
-                            if (isPoint(grid(x, y - 1))) {
-                                dy = BACKOFF_Y; // Back up if connecting to a point
-                            }
+                            if (isPoint(grid(x, y - 1))) { dy = BACKOFF_Y; }
                             decorationSet.insert(x, y - 0.5 + dy, '>', 270);
                             grid.setUsed(x, y);
+                            var q = pathSet.findVerticalPassesThrough(x, y);
+                            if (q) { q.markArrowContUp(arrowTip(x, y - 0.5 + dy, 270)); }
                         }
                     } else if (c === 'v' || c === 'V') {
-                        if (pathSet.downEndsAt(x, y + 0.5)) {
-                            decorationSet.insert(x, y + 0.5, '>', 90);
-                            grid.setUsed(x, y);
-                        } else if (pathSet.downEndsAt(x, y)) {
-                            decorationSet.insert(x, y, '>', 90);
-                            grid.setUsed(x, y);
-                        } else if (pathSet.diagonalDownEndsAt(x, y)) {
-                            decorationSet.insert(x, y, '>', 90 + DIAGONAL_ANGLE);
-                            grid.setUsed(x, y);
-                        } else if (pathSet.diagonalDownEndsAt(x - 0.5, y + 0.5)) {
-                            decorationSet.insert(x - 0.5, y + 0.5, '>', 90 + DIAGONAL_ANGLE);
-                            grid.setUsed(x, y);
-                        } else if (pathSet.diagonalDownEndsAt(x - 0.25, y + 0.25)) {
-                            decorationSet.insert(x - 0.25, y + 0.25, '>', 90 + DIAGONAL_ANGLE);
-                            grid.setUsed(x, y);
-                        } else if (pathSet.backDiagonalDownEndsAt(x, y)) {
-                            decorationSet.insert(x, y, '>', 90 - DIAGONAL_ANGLE);
-                            grid.setUsed(x, y);
-                        } else if (pathSet.backDiagonalDownEndsAt(x + 0.5, y + 0.5)) {
-                            decorationSet.insert(x + 0.5, y + 0.5, '>', 90 - DIAGONAL_ANGLE);
-                            grid.setUsed(x, y);
-                        } else if (pathSet.backDiagonalDownEndsAt(x + 0.25, y + 0.25)) {
-                            decorationSet.insert(x + 0.25, y + 0.25, '>', 90 - DIAGONAL_ANGLE);
-                            grid.setUsed(x, y);
-                        } else if (pathSet.verticalPassesThrough(x, y)) {
+                        if (!tryArrow('findDownEndsAt', x, y + 0.5, 90, 'findUpEndsAt') &&
+                            !tryArrow('findDownEndsAt', x, y, 90, 'findUpEndsAt') &&
+                            !tryArrow('findDiagonalDownEndsAt', x, y, 90 + DIAGONAL_ANGLE) &&
+                            !tryArrow('findDiagonalDownEndsAt', x - 0.5, y + 0.5, 90 + DIAGONAL_ANGLE) &&
+                            !tryArrow('findDiagonalDownEndsAt', x - 0.25, y + 0.25, 90 + DIAGONAL_ANGLE) &&
+                            !tryArrow('findBackDiagonalDownEndsAt', x, y, 90 - DIAGONAL_ANGLE) &&
+                            !tryArrow('findBackDiagonalDownEndsAt', x + 0.5, y + 0.5, 90 - DIAGONAL_ANGLE) &&
+                            !tryArrow('findBackDiagonalDownEndsAt', x + 0.25, y + 0.25, 90 - DIAGONAL_ANGLE) &&
+                            pathSet.verticalPassesThrough(x, y)) {
                             // Only try this if all others failed
-                            if (isPoint(grid(x, y + 1))) {
-                                dy = -BACKOFF_Y; // Back up if connecting to a point
-                            }
+                            if (isPoint(grid(x, y + 1))) { dy = -BACKOFF_Y; }
                             decorationSet.insert(x, y + 0.5 + dy, '>', 90);
                             grid.setUsed(x, y);
+                            var q = pathSet.findVerticalPassesThrough(x, y);
+                            if (q) { q.markArrowContDown(arrowTip(x, y + 0.5 + dy, 90)); }
                         }
                     } // arrow heads
                 } // decoration type
@@ -1480,18 +1639,54 @@ function diagramToSVG(diagramString, options) {
     attrs.viewBox = '0 0 ' + width + ' ' + height;
     // These attributes can be overridden:
     const DEFAULT_ATTRS = {
-        'class': 'diagram',
-        'text-anchor': 'middle',
-        'font-family': 'monospace',
-        'font-size': (SCALE * 13 / 8).toString() + 'px',
-        'stroke-linecap': 'round',
+        'class': 'aasvg',
     };
     Object.keys(DEFAULT_ATTRS).forEach(k => {
         if (!attrs[k]) { attrs[k] = DEFAULT_ATTRS[k]; }
     });
+    const hasText = !options.disableText && grid.hasText();
     let svg = '<svg ' + Object.keys(attrs)
         .filter(k => typeof attrs[k] === 'string')
         .map(k => k + '="' + escapeHTMLEntities(attrs[k]) + '"').join(' ') + '>\n';
+
+    svg += '<style>\n';
+    let black = 'black';
+    let white = 'white';
+    if (!options.compatible) {
+        svg +=
+            ':root { --aasvg-b: black; --aasvg-w: white; }\n' +
+            '@media (prefers-color-scheme: dark) { :root { --aasvg-b: white; --aasvg-w: black; } }\n';
+        black = 'var(--aasvg-b)';
+        white = 'var(--aasvg-w)';
+    }
+    svg += `* { fill: none; stroke: ${black}; stroke-linecap: round; }\n` +
+        '.dashed { stroke-dasharray: 3,6; }\n';
+    if (hasText || options.source) {
+        svg += `text { font: ${SCALE * 13 / 8}px monospace;` +
+            ` text-anchor: middle; fill: ${black}; stroke: none; }\n`;
+    }
+    if ((decorationSet.has('>') && options.arrow === 'solid') || decorationSet.has(TRI_CHARACTERS)) {
+        svg += `polygon.arrowhead, .triangle { fill: ${black}; stroke: none; }\n`;
+    }
+    if (decorationSet.has(POINT_CHARACTERS)) {
+        svg += `.dot.closed { fill: ${black}; }\n` +
+            `.dot:is(.open, .xor) { fill: ${white}; }\n` +
+            `.dot.dotted { fill: ${white}; stroke-dasharray: 0,1.8; }\n` +
+            '.dot.shaded { fill: #666; }\n';
+    }
+    if (options.backdrop) {
+        svg += `.backdrop { fill: ${white}; stroke: none; opacity: 0.9; }\n`;
+    }
+    if (options.grid) {
+        svg += '.grid rect { stroke: none; fill: grey; opacity: 0.1; }\n' +
+            '.grid rect.t { fill: blue; }\n' +
+            '.grid rect.l { fill: red; }\n';
+    }
+    if (options.source) {
+        svg += 'text { opacity: 0.8; }\n' +
+            '.source { fill: red; font-size: 90%; }\n';
+    }
+    svg += '</style>\n';
 
     if (options.embed) {
         svg += '<text class="ascii" display="none"><![CDATA[\n'
@@ -1502,24 +1697,21 @@ function diagramToSVG(diagramString, options) {
     if (options.backdrop) {
         svg += '<rect class="backdrop" x="0" y="0" width="' + ((grid.width + 1) * SCALE)
             + '" height="' + ((grid.height + 1) * SCALE * ASPECT)
-            + '" rx="3px" ry="3px" fill="white" opacity="0.9"/>\n';
+            + '" rx="3px" ry="3px"/>\n';
     }
     if (options.grid) {
-        svg += '<g class="grid" opacity="0.1">\n';
+        svg += '<g class="grid">\n';
         for (var x = 0; x < grid.width; ++x) {
             for (var y = 0; y < grid.height; ++y) {
                 svg += '<rect x="' + ((x + 0.5) * SCALE + 1) +
                     '" y="' + ((y + 0.5) * SCALE * ASPECT + 2) +
-                    '" width="' + (SCALE - 2) + '" height="' + (SCALE * ASPECT - 2) +
-                    '" fill="';
+                    '" width="' + (SCALE - 2) + '" height="' + (SCALE * ASPECT - 2) + '"';
                 if (grid.isUsed(x, y)) {
-                    svg += 'red';
-                } else if (grid(x, y) === ' ') {
-                    svg += 'gray" opacity="0.05';
-                } else {
-                    svg += 'blue';
+                    svg += ' class="l"';
+                } else if (grid(x, y) !== ' ') {
+                    svg += ' class="t"';
                 }
-                svg += '"/>\n';
+                svg += '/>\n';
             }
         }
         svg += '</g>\n';
@@ -1529,7 +1721,7 @@ function diagramToSVG(diagramString, options) {
     svg += decorationSet.toSVG();
 
     // Convert any remaining characters
-    if (!options.disableText) {
+    if (hasText) {
         svg += '<g class="text">\n';
         // Enlarge hexagons so that they fill a grid
         for (var y = 0; y < grid.height; ++y) {
@@ -1537,9 +1729,8 @@ function diagramToSVG(diagramString, options) {
                 var c = grid(x, y);
                 if (/[\u2B22\u2B21]/.test(c)) {
                     svg += '<text x="' + ((x + 1) * SCALE) +
-                        '" y="' + (4 + (y + 1) * SCALE * ASPECT) +
-                        '"' + TEXT_COLOR + ' font-size="20.5px">' +
-                        escapeHTMLEntities(c) + '</text>\n';
+                        '" y="' + (4 + (y + 1) * SCALE * ASPECT) + '">' +
+                        escapeHTMLEntities(unhideMarkers(c)) + '</text>\n';
                     grid.setUsed(x, y);
                 }
             } // x
@@ -1552,13 +1743,13 @@ function diagramToSVG(diagramString, options) {
                 svg += '<text x="' + ((x + (t.length / 2) + 0.5) * SCALE) +
                     '" y="' + (4 + (y + 1) * SCALE * ASPECT);
                 if (options.spaces > 2 && s.indexOf('  ') >= 0) {
-                    svg += '" xml:space="preserve'
+                    svg += '" xml:space="preserve';
                 }
                 if (options.stretch) {
                     svg += '" textLength="' + (t.length * SCALE) +
                         '" lengthAdjust="spacingAndGlyphs';
                 }
-                svg += '">' + escapeHTMLEntities(s) + '</text>\n';
+                svg += '">' + escapeHTMLEntities(unhideMarkers(s)) + '</text>\n';
                 x = grid.textStart(x + t.length, y);
             }
         } // y
@@ -1566,15 +1757,15 @@ function diagramToSVG(diagramString, options) {
     }
 
     if (options.source) {
-        svg += '<g class="source" fill="red" font-size="12px">\n';
+        svg += '<g class="source">\n';
         for (var y = 0; y < grid.height; ++y) {
             for (var x = 0; x < grid.width; ++x) {
                 var c = grid(x, y);
                 if (c !== ' ') {
                     // Offset the characters by 2 for easier viewing
                     svg += '<text x="' + ((x + 1) * SCALE + 2) +
-                        '" y="' + (6 + (y + 1) * SCALE * ASPECT) +
-                        '">' + escapeHTMLEntities(c) + '</text>';
+                        '" y="' + (6 + (y + 1) * SCALE * ASPECT) + '">' +
+                        escapeHTMLEntities(unhideMarkers(c)) + '</text>';
                 } // if
             } // x
         } // y
@@ -1583,7 +1774,7 @@ function diagramToSVG(diagramString, options) {
 
     svg += '</svg>';
 
-    return unhideMarkers(svg);
+    return svg;
 }
 
 module.exports = { diagramToSVG };
