@@ -1125,6 +1125,18 @@ function diagramToSVG(diagramString, options) {
             } // y
         } // x
 
+        // A lone '|' that isn't part of a detected vertical line becomes a
+        // one-cell vertical segment when an existing vertical line lies two
+        // rows directly above or below.
+        for (let x = 0; x < grid.width; ++x) {
+            for (let y = 0; y < grid.height; ++y) {
+                if (grid(x, y) !== '|' || grid.isUsed(x, y)) { continue; }
+                if (!pathSet.verticalPassesThrough(x, y - 2) &&
+                    !pathSet.verticalPassesThrough(x, y + 2)) { continue; }
+                pathSet.insert(new Path(Vec2(x, y - 0.5), Vec2(x, y + 0.5)));
+                grid.setUsed(x, y);
+            }
+        }
 
         // Find all solid horizontal lines
         for (let y = 0; y < grid.height; ++y) {
