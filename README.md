@@ -62,7 +62,7 @@ These options change how things are displayed in various ways.
   If large, padding will be added to the right or bottom of the image.
 
 * **arrow=line** changes arrowheads to be lines, rather than solid.
-  **arrow=solid** is the default, which has fille triangle arrowheads.
+  **arrow=solid** is the default, which has solid triangular arrowheads.
 
 * **key=value**, if not recognized as another option,
   will set attributes on the output SVG.
