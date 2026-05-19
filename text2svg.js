@@ -1741,7 +1741,7 @@ function diagramToSVG(diagramString, options) {
     if (decorationSet.has(POINT_CHARACTERS)) {
         svg += `.dot.closed { fill: ${black}; }\n` +
             `.dot:is(.open, .xor) { fill: ${white}; }\n` +
-            `.dot.dotted { fill: ${white}; stroke-dasharray: 0,1.8; }\n` +
+            `.dot.dotted { fill: ${white}; stroke-dasharray: 0,2; }\n` +
             '.dot.shaded { fill: #666; }\n';
     }
     if (options.backdrop) {
