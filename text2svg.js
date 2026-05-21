@@ -1805,27 +1805,23 @@ function diagramToSVG(diagramString, options) {
                 }
             } // x
         } // y
+        const WRAP_CLASS = { '*': 'b', '/': 'i' };
         for (let y = 0; y < grid.height; ++y) {
             let x = grid.textStart(0, y);
             while (x < grid.width) {
                 const t = grid.text(x, y);
                 const s = t.join('');
-                let displayText = s;
-                let textClass = '';
-                if (s.length >= 2 && s[0] === '*' && s[s.length - 1] === '*') {
-                    displayText = s.slice(1, -1);
-                    textClass = ' class="b"';
-                } else if (s.length >= 2 && s[0] === '/' && s[s.length - 1] === '/') {
-                    displayText = s.slice(1, -1);
-                    textClass = ' class="i"';
-                }
+                const wrapClass = s.length >= 2 && s[0] === s[s.length - 1] ? WRAP_CLASS[s[0]] : undefined;
+                const stripped = wrapClass ? 2 : 0;
+                const displayText = wrapClass ? s.slice(1, -1) : s;
+                const textClass = wrapClass ? ` class="${wrapClass}"` : '';
                 svg += '<text x="' + ((x + (t.length / 2) + 0.5) * SCALE) +
                     '" y="' + (4 + (y + 1) * SCALE * ASPECT);
                 if (options.spaces > 2 && s.indexOf('  ') >= 0) {
                     svg += '" xml:space="preserve';
                 }
                 if (options.stretch) {
-                    svg += '" textLength="' + ((t.length - (textClass ? 2 : 0)) * SCALE) +
+                    svg += '" textLength="' + ((t.length - stripped) * SCALE) +
                         '" lengthAdjust="spacingAndGlyphs';
                 }
                 svg += '"' + textClass + '>' + escapeHTMLEntities(unhideMarkers(displayText)) + '</text>\n';
