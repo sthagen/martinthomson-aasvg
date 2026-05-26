@@ -1125,6 +1125,18 @@ function diagramToSVG(diagramString, options) {
             } // y
         } // x
 
+        // A lone '|' that isn't part of a detected vertical line becomes a
+        // one-cell vertical segment when an existing vertical line lies two
+        // rows directly above or below.
+        for (let x = 0; x < grid.width; ++x) {
+            for (let y = 0; y < grid.height; ++y) {
+                if (grid(x, y) !== '|' || grid.isUsed(x, y)) { continue; }
+                if (!pathSet.verticalPassesThrough(x, y - 2) &&
+                    !pathSet.verticalPassesThrough(x, y + 2)) { continue; }
+                pathSet.insert(new Path(Vec2(x, y - 0.5), Vec2(x, y + 0.5)));
+                grid.setUsed(x, y);
+            }
+        }
 
         // Find all solid horizontal lines
         for (let y = 0; y < grid.height; ++y) {
@@ -1793,27 +1805,23 @@ function diagramToSVG(diagramString, options) {
                 }
             } // x
         } // y
+        const WRAP_CLASS = { '*': 'b', '/': 'i' };
         for (let y = 0; y < grid.height; ++y) {
             let x = grid.textStart(0, y);
             while (x < grid.width) {
                 const t = grid.text(x, y);
                 const s = t.join('');
-                let displayText = s;
-                let textClass = '';
-                if (s.length >= 2 && s[0] === '*' && s[s.length - 1] === '*') {
-                    displayText = s.slice(1, -1);
-                    textClass = ' class="b"';
-                } else if (s.length >= 2 && s[0] === '/' && s[s.length - 1] === '/') {
-                    displayText = s.slice(1, -1);
-                    textClass = ' class="i"';
-                }
+                const wrapClass = s.length >= 2 && s[0] === s[s.length - 1] ? WRAP_CLASS[s[0]] : undefined;
+                const stripped = wrapClass ? 2 : 0;
+                const displayText = wrapClass ? s.slice(1, -1) : s;
+                const textClass = wrapClass ? ` class="${wrapClass}"` : '';
                 svg += '<text x="' + ((x + (t.length / 2) + 0.5) * SCALE) +
                     '" y="' + (4 + (y + 1) * SCALE * ASPECT);
                 if (options.spaces > 2 && s.indexOf('  ') >= 0) {
                     svg += '" xml:space="preserve';
                 }
                 if (options.stretch) {
-                    svg += '" textLength="' + ((t.length - (textClass ? 2 : 0)) * SCALE) +
+                    svg += '" textLength="' + ((t.length - stripped) * SCALE) +
                         '" lengthAdjust="spacingAndGlyphs';
                 }
                 svg += '"' + textClass + '>' + escapeHTMLEntities(unhideMarkers(displayText)) + '</text>\n';
