@@ -1718,7 +1718,7 @@ function diagramToSVG(diagramString, options) {
     let black = 'black';
     let white = 'white';
     if (!options.compatible) {
-        svg += ':root { color-scheme: light dark; ' +
+        svg += '.aasvg { color-scheme: light dark; ' +
             '--aasvg-b: light-dark(black, white); --aasvg-w: light-dark(white, black); }\n';
         black = 'var(--aasvg-b)';
         white = 'var(--aasvg-w)';
@@ -1741,7 +1741,7 @@ function diagramToSVG(diagramString, options) {
     if (decorationSet.has(POINT_CHARACTERS)) {
         svg += `.dot.closed { fill: ${black}; }\n` +
             `.dot:is(.open, .xor) { fill: ${white}; }\n` +
-            `.dot.dotted { fill: ${white}; stroke-dasharray: 0,1.8; }\n` +
+            `.dot.dotted { fill: ${white}; stroke-dasharray: 0,2; }\n` +
             '.dot.shaded { fill: #666; }\n';
     }
     if (options.backdrop) {
